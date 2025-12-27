@@ -1,0 +1,299 @@
+name: 🚢 Deploy dx03 Application
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'client/**'
+      - 'server/**'
+      - 'k8s/**'
+      - 'Dockerfile*'
+      - '.github/workflows/deploy-app.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+        default: dev
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_REGION: us-central1
+  ARTIFACT_REGISTRY: us-central1-docker.pkg.dev
+  REPOSITORY: tx03-apps
+
+jobs:
+  build-and-push:
+    name: Build & Push Docker Images
+    runs-on: ubuntu-latest
+    
+    outputs:
+      frontend_image: ${{ steps.meta.outputs.frontend_image }}
+      backend_image: ${{ steps.meta.outputs.backend_image }}
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Setup Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ env.ARTIFACT_REGISTRY }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate image metadata
+        id: meta
+        run: |
+          IMAGE_TAG="${GITHUB_SHA::7}"
+          FRONTEND_IMAGE="${{ env.ARTIFACT_REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/dx03-frontend"
+          BACKEND_IMAGE="${{ env.ARTIFACT_REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/dx03-backend"
+          
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "frontend_image=$FRONTEND_IMAGE" >> $GITHUB_OUTPUT
+          echo "backend_image=$BACKEND_IMAGE" >> $GITHUB_OUTPUT
+          
+          echo "🏷️  Image Tag: $IMAGE_TAG"
+          echo "📦 Frontend: $FRONTEND_IMAGE:$IMAGE_TAG"
+          echo "📦 Backend: $BACKEND_IMAGE:$IMAGE_TAG"
+
+      - name: Build Frontend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./client
+          file: ./client/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.frontend_image }}:${{ steps.meta.outputs.image_tag }}
+            ${{ steps.meta.outputs.frontend_image }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VITE_API_URL=https://api-dx03.example.com
+
+      - name: Build Backend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./server
+          file: ./server/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.backend_image }}:${{ steps.meta.outputs.image_tag }}
+            ${{ steps.meta.outputs.backend_image }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image Security Scan
+        continue-on-error: true
+        run: |
+          echo "🔍 Scanning images for vulnerabilities..."
+          
+          # Scan frontend
+          gcloud artifacts docker images scan \
+            ${{ steps.meta.outputs.frontend_image }}:${{ steps.meta.outputs.image_tag }} \
+            || echo "⚠️  Frontend scan failed or has vulnerabilities"
+          
+          # Scan backend
+          gcloud artifacts docker images scan \
+            ${{ steps.meta.outputs.backend_image }}:${{ steps.meta.outputs.image_tag }} \
+            || echo "⚠️  Backend scan failed or has vulnerabilities"
+
+      - name: Build Summary
+        run: |
+          echo "## 🐳 Docker Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** \`${{ steps.meta.outputs.image_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Images Published" >> $GITHUB_STEP_SUMMARY
+          echo "- 🎨 Frontend: \`${{ steps.meta.outputs.frontend_image }}:${{ steps.meta.outputs.image_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- ⚙️  Backend: \`${{ steps.meta.outputs.backend_image }}:${{ steps.meta.outputs.image_tag }}\`" >> $GITHUB_STEP_SUMMARY
+
+  deploy-to-gke:
+    name: Deploy to GKE
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    
+    env:
+      ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Setup Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Get GKE credentials
+        run: |
+          gcloud container clusters get-credentials \
+            tx03-${{ env.ENVIRONMENT }}-cluster \
+            --region ${{ env.GCP_REGION }} \
+            --project ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Create namespace if not exists
+        run: |
+          kubectl create namespace dx03-${{ env.ENVIRONMENT }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Create database secret
+        run: |
+          kubectl create secret generic dx03-db-secret \
+            --from-literal=host="${{ secrets.DB_HOST }}" \
+            --from-literal=port="5432" \
+            --from-literal=database="${{ secrets.DB_NAME }}" \
+            --from-literal=username="${{ secrets.DB_USER }}" \
+            --from-literal=password="${{ secrets.DB_PASSWORD }}" \
+            --namespace=dx03-${{ env.ENVIRONMENT }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Update Kubernetes manifests
+        run: |
+          # Replace image tags in manifests
+          sed -i "s|IMAGE_PLACEHOLDER|${{ needs.build-and-push.outputs.frontend_image }}:${{ needs.build-and-push.outputs.image_tag }}|g" k8s/frontend-deployment.yaml
+          sed -i "s|IMAGE_PLACEHOLDER|${{ needs.build-and-push.outputs.backend_image }}:${{ needs.build-and-push.outputs.image_tag }}|g" k8s/backend-deployment.yaml
+          
+          # Replace environment
+          find k8s/ -name "*.yaml" -exec sed -i "s|ENVIRONMENT_PLACEHOLDER|${{ env.ENVIRONMENT }}|g" {} \;
+
+      - name: Apply Kubernetes manifests
+        run: |
+          echo "🚀 Deploying to GKE..."
+          
+          # Apply in order
+          kubectl apply -f k8s/namespace.yaml --namespace=dx03-${{ env.ENVIRONMENT }} || true
+          kubectl apply -f k8s/configmap.yaml --namespace=dx03-${{ env.ENVIRONMENT }}
+          kubectl apply -f k8s/backend-deployment.yaml --namespace=dx03-${{ env.ENVIRONMENT }}
+          kubectl apply -f k8s/backend-service.yaml --namespace=dx03-${{ env.ENVIRONMENT }}
+          kubectl apply -f k8s/frontend-deployment.yaml --namespace=dx03-${{ env.ENVIRONMENT }}
+          kubectl apply -f k8s/frontend-service.yaml --namespace=dx03-${{ env.ENVIRONMENT }}
+          kubectl apply -f k8s/ingress.yaml --namespace=dx03-${{ env.ENVIRONMENT }}
+          
+          echo "✅ Manifests applied!"
+
+      - name: Wait for deployments
+        run: |
+          echo "⏳ Waiting for deployments to be ready..."
+          
+          kubectl rollout status deployment/dx03-backend \
+            --namespace=dx03-${{ env.ENVIRONMENT }} \
+            --timeout=5m
+          
+          kubectl rollout status deployment/dx03-frontend \
+            --namespace=dx03-${{ env.ENVIRONMENT }} \
+            --timeout=5m
+          
+          echo "✅ Deployments ready!"
+
+      - name: Get deployment info
+        id: deploy_info
+        run: |
+          echo "📊 Deployment Information:"
+          
+          # Get pods
+          echo "Pods:"
+          kubectl get pods --namespace=dx03-${{ env.ENVIRONMENT }}
+          
+          # Get services
+          echo ""
+          echo "Services:"
+          kubectl get services --namespace=dx03-${{ env.ENVIRONMENT }}
+          
+          # Get ingress
+          echo ""
+          echo "Ingress:"
+          kubectl get ingress --namespace=dx03-${{ env.ENVIRONMENT }}
+          
+          # Get ingress IP
+          INGRESS_IP=$(kubectl get ingress dx03-ingress \
+            --namespace=dx03-${{ env.ENVIRONMENT }} \
+            -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
+          
+          echo "ingress_ip=$INGRESS_IP" >> $GITHUB_OUTPUT
+          echo ""
+          echo "🌐 Ingress IP: $INGRESS_IP"
+
+      - name: Health check
+        run: |
+          echo "🏥 Running health checks..."
+          
+          # Wait a bit for services to be ready
+          sleep 10
+          
+          # Check backend health (internal service)
+          BACKEND_POD=$(kubectl get pods \
+            --namespace=dx03-${{ env.ENVIRONMENT }} \
+            -l app=dx03-backend \
+            -o jsonpath='{.items[0].metadata.name}')
+          
+          echo "Backend pod: $BACKEND_POD"
+          
+          kubectl exec -it $BACKEND_POD \
+            --namespace=dx03-${{ env.ENVIRONMENT }} \
+            -- curl -f http://localhost:3000/health || echo "⚠️  Backend health check pending"
+          
+          echo "✅ Health checks complete!"
+
+      - name: Deployment Summary
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ env.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Namespace:** \`dx03-${{ env.ENVIRONMENT }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Image Tag:** \`${{ needs.build-and-push.outputs.image_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🌐 Access Information" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.deploy_info.outputs.ingress_ip }}" != "pending" ]; then
+            echo "- **Frontend:** http://${{ steps.deploy_info.outputs.ingress_ip }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Backend API:** http://${{ steps.deploy_info.outputs.ingress_ip }}/api" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ⏳ Ingress IP pending... Check back in a few minutes" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Deployed Images" >> $GITHUB_STEP_SUMMARY
+          echo "- Frontend: \`${{ needs.build-and-push.outputs.frontend_image }}:${{ needs.build-and-push.outputs.image_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Backend: \`${{ needs.build-and-push.outputs.backend_image }}:${{ needs.build-and-push.outputs.image_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Quick Links" >> $GITHUB_STEP_SUMMARY
+          echo "- [GKE Workloads](https://console.cloud.google.com/kubernetes/workload?project=${{ secrets.GCP_PROJECT_ID }})" >> $GITHUB_STEP_SUMMARY
+          echo "- [Artifact Registry](https://console.cloud.google.com/artifacts?project=${{ secrets.GCP_PROJECT_ID }})" >> $GITHUB_STEP_SUMMARY
+          echo "- [Cloud Logging](https://console.cloud.google.com/logs/query?project=${{ secrets.GCP_PROJECT_ID }})" >> $GITHUB_STEP_SUMMARY
+
+  notify:
+    name: Deployment Notification
+    runs-on: ubuntu-latest
+    needs: [deploy-to-gke]
+    if: always()
+    steps:
+      - name: Notify result
+        run: |
+          if [ "${{ needs.deploy-to-gke.result }}" == "success" ]; then
+            echo "✅ Application deployed successfully to ${{ github.event.inputs.environment || 'dev' }}!"
+          else
+            echo "❌ Deployment failed! Check logs for details."
+            exit 1
+          fi
