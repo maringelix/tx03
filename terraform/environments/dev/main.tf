@@ -80,3 +80,16 @@ module "artifact_registry" {
   environment           = var.environment
   service_account_email = var.service_account_email
 }
+
+# Cloud Armor Module
+module "cloud_armor" {
+  source = "../../modules/cloud-armor"
+
+  project_id                  = var.project_id
+  policy_name                 = "tx03-waf-policy"
+  project_name                = "tx03"
+  enable_rate_limiting        = true
+  rate_limit_threshold        = 100
+  ban_duration_sec            = 600
+  enable_adaptive_protection  = true
+}

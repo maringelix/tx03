@@ -68,3 +68,14 @@ output "artifact_registry_id" {
   description = "ID of the Artifact Registry repository"
   value       = module.artifact_registry.repository_id
 }
+
+# Cloud Armor Outputs
+output "cloud_armor_policy_name" {
+  description = "Name of the Cloud Armor WAF policy"
+  value       = module.cloud_armor.policy_name
+}
+
+output "cloud_armor_policy_id" {
+  description = "ID of the Cloud Armor WAF policy"
+  value       = module.cloud_armor.policy_id
+}
