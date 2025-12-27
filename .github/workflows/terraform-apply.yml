@@ -69,41 +69,15 @@ jobs:
           echo "✅ Validating Terraform configuration..."
           terraform validate
 
-      - name: Terraform Plan
-        id: plan
-        working-directory: terraform/environments/${{ env.ENVIRONMENT }}
-        run: |
-          echo "📋 Creating Terraform plan..."
-          terraform plan \
-            -var="project_id=${{ secrets.GCP_PROJECT_ID }}" \
-            -var="environment=${{ env.ENVIRONMENT }}" \
-            -out=tfplan \
-            -no-color \
-            2>&1 | tee plan_output.txt
-
-      - name: Extract Plan Summary
-        id: summary
-        run: |
-          cd terraform/environments/${{ env.ENVIRONMENT }}
-          
-          RESOURCES_TO_ADD=$(grep -oP 'Plan: \K\d+(?= to add)' plan_output.txt || echo "0")
-          RESOURCES_TO_CHANGE=$(grep -oP ', \K\d+(?= to change)' plan_output.txt || echo "0")
-          RESOURCES_TO_DESTROY=$(grep -oP ', \K\d+(?= to destroy)' plan_output.txt || echo "0")
-          
-          echo "resources_to_add=$RESOURCES_TO_ADD" >> $GITHUB_OUTPUT
-          echo "resources_to_change=$RESOURCES_TO_CHANGE" >> $GITHUB_OUTPUT
-          echo "resources_to_destroy=$RESOURCES_TO_DESTROY" >> $GITHUB_OUTPUT
-          
-          echo "📊 Plan Summary:"
-          echo "  🆕 Add: $RESOURCES_TO_ADD"
-          echo "  🔄 Change: $RESOURCES_TO_CHANGE"
-          echo "  🗑️ Destroy: $RESOURCES_TO_DESTROY"
-
       - name: Terraform Apply
         working-directory: terraform/environments/${{ env.ENVIRONMENT }}
+        timeout-minutes: 30
         run: |
           echo "🚀 Applying Terraform changes..."
-          terraform apply -auto-approve tfplan
+          terraform apply -auto-approve \
+            -var="project_id=${{ secrets.GCP_PROJECT_ID }}" \
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -parallelism=10
           echo "✅ Infrastructure deployed successfully!"
 
       - name: Get Infrastructure Outputs
