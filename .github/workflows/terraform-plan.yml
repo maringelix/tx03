@@ -1,0 +1,169 @@
+name: Terraform Plan (PR)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform-*.yml'
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+jobs:
+  plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    
+    env:
+      TF_VERSION: '1.9.0'
+      ENVIRONMENT: 'dev'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Setup Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        working-directory: terraform/environments/${{ env.ENVIRONMENT }}
+        run: |
+          echo "🎨 Checking Terraform formatting..."
+          terraform fmt -check -recursive || {
+            echo "❌ Terraform files are not formatted correctly."
+            echo "Run: terraform fmt -recursive"
+            exit 1
+          }
+          echo "✅ Formatting check passed!"
+
+      - name: Terraform Init
+        working-directory: terraform/environments/${{ env.ENVIRONMENT }}
+        run: |
+          echo "🔧 Initializing Terraform..."
+          terraform init \
+            -backend-config="bucket=${{ secrets.GCS_BUCKET }}" \
+            -backend-config="prefix=terraform/state/${{ env.ENVIRONMENT }}"
+
+      - name: Terraform Validate
+        working-directory: terraform/environments/${{ env.ENVIRONMENT }}
+        run: |
+          echo "✅ Validating Terraform configuration..."
+          terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: terraform/environments/${{ env.ENVIRONMENT }}
+        run: |
+          echo "📋 Creating Terraform plan..."
+          terraform plan \
+            -var="project_id=${{ secrets.GCP_PROJECT_ID }}" \
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -out=tfplan \
+            -no-color \
+            2>&1 | tee plan_output.txt
+          
+          # Save plan output for PR comment
+          cat plan_output.txt > $GITHUB_WORKSPACE/plan_output.txt
+
+      - name: Generate Plan Summary
+        id: summary
+        run: |
+          echo "📊 Generating plan summary..."
+          
+          # Extract key metrics
+          RESOURCES_TO_ADD=$(grep -oP 'Plan: \K\d+(?= to add)' plan_output.txt || echo "0")
+          RESOURCES_TO_CHANGE=$(grep -oP ', \K\d+(?= to change)' plan_output.txt || echo "0")
+          RESOURCES_TO_DESTROY=$(grep -oP ', \K\d+(?= to destroy)' plan_output.txt || echo "0")
+          
+          echo "resources_to_add=$RESOURCES_TO_ADD" >> $GITHUB_OUTPUT
+          echo "resources_to_change=$RESOURCES_TO_CHANGE" >> $GITHUB_OUTPUT
+          echo "resources_to_destroy=$RESOURCES_TO_DESTROY" >> $GITHUB_OUTPUT
+
+      - name: Comment PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const planOutput = fs.readFileSync('plan_output.txt', 'utf8');
+            const addCount = '${{ steps.summary.outputs.resources_to_add }}';
+            const changeCount = '${{ steps.summary.outputs.resources_to_change }}';
+            const destroyCount = '${{ steps.summary.outputs.resources_to_destroy }}';
+            
+            let emoji = '✅';
+            if (destroyCount > 0) emoji = '⚠️';
+            if (parseInt(addCount) + parseInt(changeCount) + parseInt(destroyCount) === 0) emoji = '✨';
+            
+            const comment = `## ${emoji} Terraform Plan - \`${{ env.ENVIRONMENT }}\`
+            
+            **Resources Summary:**
+            - 🆕 To Add: **${addCount}**
+            - 🔄 To Change: **${changeCount}**
+            - 🗑️ To Destroy: **${destroyCount}**
+            
+            <details>
+            <summary>📋 Full Terraform Plan Output</summary>
+            
+            \`\`\`hcl
+            ${planOutput}
+            \`\`\`
+            
+            </details>
+            
+            ---
+            
+            **Workflow Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            **Triggered by:** @${{ github.actor }}
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Check for Destructive Changes
+        if: steps.summary.outputs.resources_to_destroy > 0
+        run: |
+          echo "⚠️  WARNING: This plan will DESTROY ${{ steps.summary.outputs.resources_to_destroy }} resource(s)!"
+          echo ""
+          echo "Please review carefully before merging."
+          echo ""
+          echo "Destructive changes detected. Manual review required."
+
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ env.ENVIRONMENT }}-pr-${{ github.event.pull_request.number }}
+          path: |
+            terraform/environments/${{ env.ENVIRONMENT }}/tfplan
+            plan_output.txt
+          retention-days: 7
+
+      - name: Job Summary
+        if: always()
+        run: |
+          echo "## Terraform Plan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ env.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Changes:**" >> $GITHUB_STEP_SUMMARY
+          echo "- 🆕 Resources to add: ${{ steps.summary.outputs.resources_to_add }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔄 Resources to change: ${{ steps.summary.outputs.resources_to_change }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 🗑️ Resources to destroy: ${{ steps.summary.outputs.resources_to_destroy }}" >> $GITHUB_STEP_SUMMARY

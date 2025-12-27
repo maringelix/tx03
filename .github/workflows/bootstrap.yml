@@ -1,0 +1,296 @@
+name: Bootstrap Terraform Backend
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - create
+          - destroy
+        default: create
+      confirm_destroy:
+        description: 'Type "destroy" to confirm destruction'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write  # Required for Workload Identity Federation
+
+jobs:
+  validate-destroy:
+    name: Validate Destroy Input
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'destroy'
+    steps:
+      - name: Check destroy confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm_destroy }}" != "destroy" ]; then
+            echo "❌ Destroy confirmation failed. You must type 'destroy' to confirm."
+            exit 1
+          fi
+          echo "✅ Destroy confirmed"
+
+  bootstrap:
+    name: Bootstrap Terraform Backend
+    runs-on: ubuntu-latest
+    needs: [validate-destroy]
+    if: |
+      always() && 
+      (github.event.inputs.action == 'create' || 
+       (github.event.inputs.action == 'destroy' && needs.validate-destroy.result == 'success'))
+    
+    env:
+      TF_VERSION: '1.9.0'
+      GCP_REGION: 'us-central1'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Setup Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Verify GCP authentication
+        run: |
+          echo "🔍 Verifying GCP authentication..."
+          gcloud auth list
+          gcloud config list project
+          gcloud projects describe ${{ secrets.GCP_PROJECT_ID }}
+          echo "✅ Authentication successful!"
+
+      - name: Enable required APIs
+        if: github.event.inputs.action == 'create'
+        run: |
+          echo "🔧 Enabling required GCP APIs..."
+          gcloud services enable \
+            storage.googleapis.com \
+            cloudresourcemanager.googleapis.com \
+            iam.googleapis.com \
+            iamcredentials.googleapis.com \
+            sts.googleapis.com \
+            compute.googleapis.com \
+            container.googleapis.com \
+            sqladmin.googleapis.com \
+            artifactregistry.googleapis.com \
+            servicenetworking.googleapis.com
+          echo "✅ APIs enabled!"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Create bootstrap directory structure
+        if: github.event.inputs.action == 'create'
+        run: |
+          mkdir -p terraform/bootstrap
+          
+          # Create main.tf
+          cat > terraform/bootstrap/main.tf << 'EOF'
+          terraform {
+            required_version = ">= 1.9.0"
+            
+            required_providers {
+              google = {
+                source  = "hashicorp/google"
+                version = "~> 6.0"
+              }
+              random = {
+                source  = "hashicorp/random"
+                version = "~> 3.6"
+              }
+            }
+          }
+
+          provider "google" {
+            project = var.project_id
+            region  = var.region
+          }
+
+          # Random suffix for bucket name (globally unique)
+          resource "random_id" "bucket_suffix" {
+            byte_length = 4
+          }
+
+          # GCS bucket for Terraform state
+          resource "google_storage_bucket" "terraform_state" {
+            name          = "tfstate-tx03-${random_id.bucket_suffix.hex}"
+            location      = "US"
+            force_destroy = false
+            
+            uniform_bucket_level_access = true
+            
+            versioning {
+              enabled = true
+            }
+            
+            lifecycle_rule {
+              action {
+                type = "Delete"
+              }
+              condition {
+                num_newer_versions = 5
+                with_state         = "ARCHIVED"
+              }
+            }
+            
+            labels = {
+              environment = "production"
+              managed_by  = "terraform"
+              project     = "tx03"
+            }
+          }
+
+          # IAM binding for GitHub Actions service account
+          resource "google_storage_bucket_iam_member" "terraform_state_admin" {
+            bucket = google_storage_bucket.terraform_state.name
+            role   = "roles/storage.objectAdmin"
+            member = "serviceAccount:${var.service_account_email}"
+          }
+          EOF
+
+          # Create variables.tf
+          cat > terraform/bootstrap/variables.tf << 'EOF'
+          variable "project_id" {
+            description = "GCP Project ID"
+            type        = string
+          }
+
+          variable "region" {
+            description = "GCP Region"
+            type        = string
+            default     = "us-central1"
+          }
+
+          variable "service_account_email" {
+            description = "Service Account email for GitHub Actions"
+            type        = string
+          }
+          EOF
+
+          # Create outputs.tf
+          cat > terraform/bootstrap/outputs.tf << 'EOF'
+          output "bucket_name" {
+            description = "Name of the Terraform state bucket"
+            value       = google_storage_bucket.terraform_state.name
+          }
+
+          output "bucket_url" {
+            description = "URL of the Terraform state bucket"
+            value       = google_storage_bucket.terraform_state.url
+          }
+
+          output "bucket_location" {
+            description = "Location of the Terraform state bucket"
+            value       = google_storage_bucket.terraform_state.location
+          }
+          EOF
+
+      - name: Terraform Init
+        working-directory: terraform/bootstrap
+        run: terraform init
+
+      - name: Terraform Validate
+        working-directory: terraform/bootstrap
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: terraform/bootstrap
+        run: |
+          terraform plan \
+            -var="project_id=${{ secrets.GCP_PROJECT_ID }}" \
+            -var="region=${{ env.GCP_REGION }}" \
+            -var="service_account_email=${{ secrets.WIF_SERVICE_ACCOUNT }}" \
+            -out=tfplan
+          
+          echo "📋 Terraform Plan Summary:"
+          terraform show -no-color tfplan | grep -E "Plan:|No changes"
+
+      - name: Terraform Apply (Create)
+        if: github.event.inputs.action == 'create'
+        working-directory: terraform/bootstrap
+        run: |
+          echo "🚀 Creating Terraform backend..."
+          terraform apply -auto-approve tfplan
+          
+          echo "✅ Bootstrap complete!"
+          echo ""
+          echo "📦 Terraform State Bucket:"
+          terraform output -raw bucket_name
+          echo ""
+          echo "🔗 Bucket URL:"
+          terraform output -raw bucket_url
+
+      - name: Save bucket name to GitHub Environment
+        if: github.event.inputs.action == 'create'
+        working-directory: terraform/bootstrap
+        run: |
+          BUCKET_NAME=$(terraform output -raw bucket_name)
+          echo "GCS_BUCKET=$BUCKET_NAME" >> $GITHUB_ENV
+          echo "📝 Bucket name saved: $BUCKET_NAME"
+          echo ""
+          echo "⚠️  IMPORTANT: Add this as a GitHub secret:"
+          echo "   Name: GCS_BUCKET"
+          echo "   Value: $BUCKET_NAME"
+
+      - name: Terraform Destroy
+        if: github.event.inputs.action == 'destroy'
+        working-directory: terraform/bootstrap
+        run: |
+          echo "🗑️  Destroying Terraform backend..."
+          terraform destroy \
+            -var="project_id=${{ secrets.GCP_PROJECT_ID }}" \
+            -var="region=${{ env.GCP_REGION }}" \
+            -var="service_account_email=${{ secrets.WIF_SERVICE_ACCOUNT }}" \
+            -auto-approve
+          
+          echo "✅ Bootstrap resources destroyed!"
+
+      - name: Upload Terraform State
+        if: github.event.inputs.action == 'create'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-terraform-state
+          path: terraform/bootstrap/terraform.tfstate
+          retention-days: 7
+
+  summary:
+    name: Summary
+    runs-on: ubuntu-latest
+    needs: [bootstrap]
+    if: always()
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## Bootstrap Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Action**: ${{ github.event.inputs.action }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status**: ${{ needs.bootstrap.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.bootstrap.result }}" == "success" ]; then
+            echo "✅ Bootstrap completed successfully!" >> $GITHUB_STEP_SUMMARY
+            
+            if [ "${{ github.event.inputs.action }}" == "create" ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "1. Download the \`bootstrap-terraform-state\` artifact" >> $GITHUB_STEP_SUMMARY
+              echo "2. Get the bucket name from Terraform outputs" >> $GITHUB_STEP_SUMMARY
+              echo "3. Add \`GCS_BUCKET\` secret to GitHub repository" >> $GITHUB_STEP_SUMMARY
+              echo "4. Commit bootstrap Terraform files to repository" >> $GITHUB_STEP_SUMMARY
+              echo "5. Run infrastructure deployment workflow" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "❌ Bootstrap failed. Check logs above." >> $GITHUB_STEP_SUMMARY
+          fi

@@ -1,0 +1,277 @@
+name: Destroy Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to destroy'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+      confirm_destroy:
+        description: 'Type "destroy" to confirm'
+        required: true
+        type: string
+      destroy_backend:
+        description: 'Also destroy Terraform backend (GCS bucket)?'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  validate:
+    name: Validate Destroy Request
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm_destroy }}" != "destroy" ]; then
+            echo "❌ Destroy confirmation failed!"
+            echo "You must type 'destroy' to confirm destruction."
+            exit 1
+          fi
+          echo "✅ Destroy confirmed by @${{ github.actor }}"
+
+      - name: Environment check
+        run: |
+          echo "⚠️  WARNING: About to destroy ${{ github.event.inputs.environment }} environment!"
+          echo ""
+          echo "Environment: ${{ github.event.inputs.environment }}"
+          echo "Backend will be destroyed: ${{ github.event.inputs.destroy_backend }}"
+          echo "Initiated by: @${{ github.actor }}"
+          echo ""
+          sleep 5  # Give time to cancel if triggered accidentally
+
+  destroy-infrastructure:
+    name: Destroy Infrastructure
+    runs-on: ubuntu-latest
+    needs: [validate]
+    
+    env:
+      TF_VERSION: '1.9.0'
+      ENVIRONMENT: ${{ github.event.inputs.environment }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Setup Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: List Current Resources
+        run: |
+          echo "📋 Current GCP resources..."
+          
+          # List GKE clusters
+          echo "🎯 GKE Clusters:"
+          gcloud container clusters list --format="table(name,location,status)" || echo "None"
+          
+          # List Cloud SQL instances
+          echo ""
+          echo "🗄️  Cloud SQL Instances:"
+          gcloud sql instances list --format="table(name,region,databaseVersion,state)" || echo "None"
+          
+          # List Load Balancers
+          echo ""
+          echo "🌐 Load Balancers:"
+          gcloud compute forwarding-rules list --format="table(name,region,IPAddress)" || echo "None"
+          
+          # List Artifact Registry repos
+          echo ""
+          echo "📦 Artifact Registry:"
+          gcloud artifacts repositories list --format="table(name,location,format)" || echo "None"
+
+      - name: Terraform Init
+        working-directory: terraform/environments/${{ env.ENVIRONMENT }}
+        run: |
+          echo "🔧 Initializing Terraform..."
+          terraform init \
+            -backend-config="bucket=${{ secrets.GCS_BUCKET }}" \
+            -backend-config="prefix=terraform/state/${{ env.ENVIRONMENT }}"
+
+      - name: Terraform Plan Destroy
+        working-directory: terraform/environments/${{ env.ENVIRONMENT }}
+        run: |
+          echo "📋 Creating destroy plan..."
+          terraform plan \
+            -destroy \
+            -var="project_id=${{ secrets.GCP_PROJECT_ID }}" \
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -out=destroy.tfplan \
+            2>&1 | tee destroy_plan.txt
+          
+          # Count resources to destroy
+          RESOURCES=$(grep -oP 'Plan: \K\d+(?= to destroy)' destroy_plan.txt || echo "0")
+          echo "🗑️  Resources to destroy: $RESOURCES"
+          
+          if [ "$RESOURCES" -eq "0" ]; then
+            echo "✨ No resources to destroy."
+            exit 0
+          fi
+
+      - name: Terraform Destroy
+        working-directory: terraform/environments/${{ env.ENVIRONMENT }}
+        run: |
+          echo "🗑️  Destroying infrastructure..."
+          terraform apply -auto-approve destroy.tfplan
+          echo "✅ Infrastructure destroyed!"
+
+      - name: Force Cleanup Remaining Resources
+        if: always()
+        continue-on-error: true
+        run: |
+          echo "🧹 Force cleanup of remaining resources..."
+          
+          # Delete any remaining GKE clusters
+          CLUSTERS=$(gcloud container clusters list --format="value(name)" --filter="name~tx03-" || echo "")
+          for CLUSTER in $CLUSTERS; do
+            echo "Deleting cluster: $CLUSTER"
+            gcloud container clusters delete "$CLUSTER" --region=us-central1 --quiet || true
+          done
+          
+          # Delete Cloud SQL instances (with protection)
+          SQL_INSTANCES=$(gcloud sql instances list --format="value(name)" --filter="name~tx03-" || echo "")
+          for INSTANCE in $SQL_INSTANCES; do
+            echo "Deleting SQL instance: $INSTANCE"
+            # Remove deletion protection first
+            gcloud sql instances patch "$INSTANCE" --no-deletion-protection --quiet || true
+            gcloud sql instances delete "$INSTANCE" --quiet || true
+          done
+          
+          # Delete Load Balancers
+          LBS=$(gcloud compute forwarding-rules list --format="value(name)" --filter="name~tx03-" || echo "")
+          for LB in $LBS; do
+            echo "Deleting load balancer: $LB"
+            gcloud compute forwarding-rules delete "$LB" --global --quiet || true
+          done
+          
+          echo "✅ Force cleanup complete!"
+
+      - name: Verify Destruction
+        run: |
+          echo "🔍 Verifying resource destruction..."
+          
+          REMAINING_CLUSTERS=$(gcloud container clusters list --filter="name~tx03-" --format="value(name)" | wc -l)
+          REMAINING_SQL=$(gcloud sql instances list --filter="name~tx03-" --format="value(name)" | wc -l)
+          REMAINING_LBS=$(gcloud compute forwarding-rules list --filter="name~tx03-" --format="value(name)" | wc -l)
+          
+          echo "Remaining resources:"
+          echo "  GKE Clusters: $REMAINING_CLUSTERS"
+          echo "  Cloud SQL: $REMAINING_SQL"
+          echo "  Load Balancers: $REMAINING_LBS"
+          
+          TOTAL=$((REMAINING_CLUSTERS + REMAINING_SQL + REMAINING_LBS))
+          
+          if [ "$TOTAL" -eq "0" ]; then
+            echo "✅ All resources destroyed successfully!"
+          else
+            echo "⚠️  Warning: $TOTAL resources still remain. Manual cleanup may be required."
+          fi
+
+      - name: Upload Destroy Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: destroy-log-${{ env.ENVIRONMENT }}
+          path: terraform/environments/${{ env.ENVIRONMENT }}/destroy_plan.txt
+          retention-days: 30
+
+  destroy-backend:
+    name: Destroy Terraform Backend
+    runs-on: ubuntu-latest
+    needs: [destroy-infrastructure]
+    if: github.event.inputs.destroy_backend == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Setup Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Delete GCS Bucket
+        run: |
+          echo "🗑️  Deleting Terraform state bucket..."
+          
+          BUCKET="${{ secrets.GCS_BUCKET }}"
+          
+          # Remove versioning
+          gcloud storage buckets update "gs://$BUCKET" --no-versioning || true
+          
+          # Delete all objects and versions
+          gcloud storage rm -r "gs://$BUCKET/**" --all-versions || true
+          
+          # Delete bucket
+          gcloud storage buckets delete "gs://$BUCKET" --quiet
+          
+          echo "✅ Terraform backend destroyed!"
+
+      - name: Cleanup Warning
+        run: |
+          echo "⚠️  IMPORTANT: Terraform backend has been destroyed!"
+          echo ""
+          echo "To use this project again, you must:"
+          echo "1. Re-run the bootstrap workflow"
+          echo "2. Update GCS_BUCKET secret with new bucket name"
+          echo "3. Re-initialize Terraform in all environments"
+
+  summary:
+    name: Destruction Summary
+    runs-on: ubuntu-latest
+    needs: [destroy-infrastructure, destroy-backend]
+    if: always()
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## 🗑️  Destruction Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Initiated by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Backend destroyed:** ${{ github.event.inputs.destroy_backend }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.destroy-infrastructure.result }}" == "success" ]; then
+            echo "✅ Infrastructure destroyed successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Infrastructure destruction failed or was cancelled" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ github.event.inputs.destroy_backend }}" == "true" ]; then
+            if [ "${{ needs.destroy-backend.result }}" == "success" ]; then
+              echo "✅ Terraform backend destroyed successfully" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ Terraform backend destruction failed" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 💰 Cost Impact" >> $GITHUB_STEP_SUMMARY
+          echo "Destroying infrastructure will stop incurring costs (~\$58-87/month saved)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ⏭️  Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "- Verify all resources are deleted in [GCP Console](https://console.cloud.google.com/home/dashboard?project=${{ secrets.GCP_PROJECT_ID }})" >> $GITHUB_STEP_SUMMARY
+          echo "- Check for any orphaned resources (disks, IPs, etc.)" >> $GITHUB_STEP_SUMMARY
+          echo "- Review [Cloud Billing](https://console.cloud.google.com/billing) to confirm cost reduction" >> $GITHUB_STEP_SUMMARY

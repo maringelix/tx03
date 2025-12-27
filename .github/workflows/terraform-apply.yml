@@ -1,0 +1,235 @@
+name: Deploy Infrastructure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform-*.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+        default: dev
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment || 'dev' }}
+    runs-on: ubuntu-latest
+    
+    env:
+      TF_VERSION: '1.9.0'
+      ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Setup Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Verify GCP Setup
+        run: |
+          echo "🔍 Verifying GCP setup..."
+          gcloud projects describe ${{ secrets.GCP_PROJECT_ID }}
+          gcloud config list
+          echo "✅ GCP verification complete!"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: terraform/environments/${{ env.ENVIRONMENT }}
+        run: |
+          echo "🔧 Initializing Terraform..."
+          terraform init \
+            -backend-config="bucket=${{ secrets.GCS_BUCKET }}" \
+            -backend-config="prefix=terraform/state/${{ env.ENVIRONMENT }}"
+
+      - name: Terraform Validate
+        working-directory: terraform/environments/${{ env.ENVIRONMENT }}
+        run: |
+          echo "✅ Validating Terraform configuration..."
+          terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: terraform/environments/${{ env.ENVIRONMENT }}
+        run: |
+          echo "📋 Creating Terraform plan..."
+          terraform plan \
+            -var="project_id=${{ secrets.GCP_PROJECT_ID }}" \
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -out=tfplan \
+            -no-color \
+            2>&1 | tee plan_output.txt
+
+      - name: Extract Plan Summary
+        id: summary
+        run: |
+          cd terraform/environments/${{ env.ENVIRONMENT }}
+          
+          RESOURCES_TO_ADD=$(grep -oP 'Plan: \K\d+(?= to add)' plan_output.txt || echo "0")
+          RESOURCES_TO_CHANGE=$(grep -oP ', \K\d+(?= to change)' plan_output.txt || echo "0")
+          RESOURCES_TO_DESTROY=$(grep -oP ', \K\d+(?= to destroy)' plan_output.txt || echo "0")
+          
+          echo "resources_to_add=$RESOURCES_TO_ADD" >> $GITHUB_OUTPUT
+          echo "resources_to_change=$RESOURCES_TO_CHANGE" >> $GITHUB_OUTPUT
+          echo "resources_to_destroy=$RESOURCES_TO_DESTROY" >> $GITHUB_OUTPUT
+          
+          echo "📊 Plan Summary:"
+          echo "  🆕 Add: $RESOURCES_TO_ADD"
+          echo "  🔄 Change: $RESOURCES_TO_CHANGE"
+          echo "  🗑️ Destroy: $RESOURCES_TO_DESTROY"
+
+      - name: Terraform Apply
+        working-directory: terraform/environments/${{ env.ENVIRONMENT }}
+        run: |
+          echo "🚀 Applying Terraform changes..."
+          terraform apply -auto-approve tfplan
+          echo "✅ Infrastructure deployed successfully!"
+
+      - name: Get Infrastructure Outputs
+        id: outputs
+        working-directory: terraform/environments/${{ env.ENVIRONMENT }}
+        run: |
+          echo "📤 Extracting Terraform outputs..."
+          
+          # Save all outputs to JSON
+          terraform output -json > outputs.json
+          
+          # Extract key outputs (customize based on your modules)
+          if terraform output gke_cluster_name &> /dev/null; then
+            GKE_CLUSTER=$(terraform output -raw gke_cluster_name)
+            echo "gke_cluster=$GKE_CLUSTER" >> $GITHUB_OUTPUT
+            echo "🎯 GKE Cluster: $GKE_CLUSTER"
+          fi
+          
+          if terraform output cloudsql_instance_name &> /dev/null; then
+            SQL_INSTANCE=$(terraform output -raw cloudsql_instance_name)
+            echo "sql_instance=$SQL_INSTANCE" >> $GITHUB_OUTPUT
+            echo "🗄️  Cloud SQL: $SQL_INSTANCE"
+          fi
+          
+          if terraform output load_balancer_ip &> /dev/null; then
+            LB_IP=$(terraform output -raw load_balancer_ip)
+            echo "load_balancer_ip=$LB_IP" >> $GITHUB_OUTPUT
+            echo "🌐 Load Balancer IP: $LB_IP"
+          fi
+
+      - name: Configure kubectl
+        if: steps.outputs.outputs.gke_cluster != ''
+        run: |
+          echo "⚙️  Configuring kubectl..."
+          gcloud container clusters get-credentials \
+            ${{ steps.outputs.outputs.gke_cluster }} \
+            --region us-central1 \
+            --project ${{ secrets.GCP_PROJECT_ID }}
+          
+          echo "📦 Cluster info:"
+          kubectl cluster-info
+          
+          echo "🎯 Nodes:"
+          kubectl get nodes
+
+      - name: Health Check
+        if: steps.outputs.outputs.gke_cluster != ''
+        run: |
+          echo "🏥 Running infrastructure health checks..."
+          
+          # Check GKE cluster status
+          CLUSTER_STATUS=$(gcloud container clusters describe \
+            ${{ steps.outputs.outputs.gke_cluster }} \
+            --region us-central1 \
+            --format="value(status)")
+          
+          if [ "$CLUSTER_STATUS" == "RUNNING" ]; then
+            echo "✅ GKE Cluster: HEALTHY"
+          else
+            echo "⚠️  GKE Cluster status: $CLUSTER_STATUS"
+          fi
+          
+          # Check node readiness
+          READY_NODES=$(kubectl get nodes --no-headers | grep -c " Ready " || echo "0")
+          TOTAL_NODES=$(kubectl get nodes --no-headers | wc -l)
+          echo "✅ Nodes Ready: $READY_NODES/$TOTAL_NODES"
+
+      - name: Upload Terraform Outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-outputs-${{ env.ENVIRONMENT }}
+          path: terraform/environments/${{ env.ENVIRONMENT }}/outputs.json
+          retention-days: 30
+
+      - name: Deployment Summary
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ env.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ✅ Success" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Infrastructure Changes" >> $GITHUB_STEP_SUMMARY
+          echo "- 🆕 Resources added: ${{ steps.summary.outputs.resources_to_add }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔄 Resources changed: ${{ steps.summary.outputs.resources_to_change }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 🗑️ Resources destroyed: ${{ steps.summary.outputs.resources_to_destroy }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -n "${{ steps.outputs.outputs.gke_cluster }}" ]; then
+            echo "### 🎯 Key Resources" >> $GITHUB_STEP_SUMMARY
+            echo "- **GKE Cluster:** \`${{ steps.outputs.outputs.gke_cluster }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -n "${{ steps.outputs.outputs.sql_instance }}" ]; then
+            echo "- **Cloud SQL:** \`${{ steps.outputs.outputs.sql_instance }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -n "${{ steps.outputs.outputs.load_balancer_ip }}" ]; then
+            echo "- **Load Balancer:** \`${{ steps.outputs.outputs.load_balancer_ip }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Quick Access" >> $GITHUB_STEP_SUMMARY
+          echo "- [GCP Console](https://console.cloud.google.com/home/dashboard?project=${{ secrets.GCP_PROJECT_ID }})" >> $GITHUB_STEP_SUMMARY
+          echo "- [GKE Clusters](https://console.cloud.google.com/kubernetes/list?project=${{ secrets.GCP_PROJECT_ID }})" >> $GITHUB_STEP_SUMMARY
+          echo "- [Cloud SQL](https://console.cloud.google.com/sql/instances?project=${{ secrets.GCP_PROJECT_ID }})" >> $GITHUB_STEP_SUMMARY
+
+  notify-success:
+    name: Notify Success
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    if: success()
+    steps:
+      - name: Success notification
+        run: |
+          echo "✅ Infrastructure deployed successfully to ${{ github.event.inputs.environment || 'dev' }}!"
+          echo "🔗 Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+  notify-failure:
+    name: Notify Failure
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    if: failure()
+    steps:
+      - name: Failure notification
+        run: |
+          echo "❌ Infrastructure deployment failed!"
+          echo "🔗 Check logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          exit 1

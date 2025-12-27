@@ -1,0 +1,72 @@
+# Terraform
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.auto.tfvars.example
+.terraform/
+.terraform.lock.hcl
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Terraform Plans
+*.tfplan
+tfplan
+
+# Google Cloud
+.gcloud/
+*.json
+!*example*.json
+credentials.json
+service-account-key.json
+
+# Kubernetes
+kubeconfig
+*.kubeconfig
+
+# Secrets
+.env
+.env.*
+!.env.example
+secrets/
+*.secret
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.backup
+
+# Node modules (if any scripts use Node)
+node_modules/
+
+# Python (if any scripts use Python)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+
+# OS Files
+Thumbs.db
+.DS_Store
+desktop.ini
