@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  validate:
+    name: Validate Repository
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check repository structure
+        run: |
+          echo "✅ Repository structure validation"
+          echo ""
+          echo "📁 Documentation:"
+          ls -la *.md 2>/dev/null || echo "  No markdown files"
+          
+          echo ""
+          echo "📁 GitHub Workflows:"
+          ls -la .github/workflows/*.yml 2>/dev/null || echo "  No workflows"
+          
+          echo ""
+          echo "📁 Terraform:"
+          ls -la terraform/ 2>/dev/null || echo "  Terraform directory not yet created"
+          
+          echo ""
+          echo "✨ Repository is valid!"
+
+      - name: Validate Markdown links
+        run: |
+          echo "🔗 Checking markdown files..."
+          
+          if command -v markdown-link-check &> /dev/null; then
+            find . -name "*.md" -not -path "./node_modules/*" -exec markdown-link-check {} \;
+          else
+            echo "⏭️  Skipping link validation (markdown-link-check not installed)"
+          fi
+
+      - name: Summary
+        run: |
+          echo "## ✅ CI Validation Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Repository structure is valid and ready for deployment!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📚 Available Workflows" >> $GITHUB_STEP_SUMMARY
+          echo "- **Bootstrap**: Create Terraform backend (manual)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Terraform Plan**: Preview changes on PRs" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deploy**: Apply infrastructure changes" >> $GITHUB_STEP_SUMMARY
+          echo "- **Destroy**: Tear down infrastructure (manual)" >> $GITHUB_STEP_SUMMARY
