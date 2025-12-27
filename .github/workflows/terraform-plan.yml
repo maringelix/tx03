@@ -77,12 +77,14 @@ jobs:
       - name: Terraform Plan
         id: plan
         working-directory: terraform/environments/${{ env.ENVIRONMENT }}
+        timeout-minutes: 15
         run: |
           echo "📋 Creating Terraform plan..."
           terraform plan \
             -var="project_id=${{ secrets.GCP_PROJECT_ID }}" \
             -var="environment=${{ env.ENVIRONMENT }}" \
             -out=tfplan \
+            -parallelism=10 \
             -no-color \
             2>&1 | tee plan_output.txt
           
