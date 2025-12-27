@@ -48,12 +48,7 @@ resource "google_container_cluster" "primary" {
     }
   }
 
-  # Network policy
-  network_policy {
-    enabled = true
-  }
-
-  # Addons
+  # Addons (Autopilot manages network policies automatically)
   addons_config {
     http_load_balancing {
       disabled = false
