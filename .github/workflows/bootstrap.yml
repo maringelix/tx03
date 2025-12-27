@@ -1,6 +1,10 @@
-name: Bootstrap Terraform Backend
+name: 🚀 Bootstrap Terraform Backend
 
 on:
+  push:
+    branches: [master, main]
+    paths:
+      - '.github/workflows/bootstrap.yml'
   workflow_dispatch:
     inputs:
       action:
