@@ -6,6 +6,16 @@ on:
     paths:
       - 'terraform/**'
       - '.github/workflows/terraform-*.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to plan'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+        default: dev
 
 permissions:
   contents: read
@@ -19,7 +29,7 @@ jobs:
     
     env:
       TF_VERSION: '1.9.0'
-      ENVIRONMENT: 'dev'
+      ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
     
     steps:
       - name: Checkout code
