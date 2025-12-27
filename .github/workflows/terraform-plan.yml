@@ -140,12 +140,18 @@ jobs:
             **Triggered by:** @${{ github.actor }}
             `;
             
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
+            // Only comment on PRs
+            if (context.issue.number) {
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            } else {
+              console.log('Skipping comment - not a pull request');
+              console.log(comment);
+            }
 
       - name: Check for Destructive Changes
         if: steps.summary.outputs.resources_to_destroy > 0
@@ -157,9 +163,10 @@ jobs:
           echo "Destructive changes detected. Manual review required."
 
       - name: Upload Plan
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tfplan-${{ env.ENVIRONMENT }}-pr-${{ github.event.pull_request.number }}
+          name: tfplan-${{ env.ENVIRONMENT }}-${{ github.run_number }}
           path: |
             terraform/environments/${{ env.ENVIRONMENT }}/tfplan
             plan_output.txt
