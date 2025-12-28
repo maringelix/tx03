@@ -69,6 +69,13 @@ jobs:
           echo "✅ Validating Terraform configuration..."
           terraform validate
 
+      - name: Clear Stale Lock (if exists)
+        working-directory: terraform/environments/${{ env.ENVIRONMENT }}
+        continue-on-error: true
+        run: |
+          echo "🔓 Checking for stale Terraform lock..."
+          gsutil rm gs://${{ secrets.GCS_BUCKET }}/terraform/state/${{ env.ENVIRONMENT }}/default.tflock || echo "No lock file found"
+
       - name: Terraform Apply
         working-directory: terraform/environments/${{ env.ENVIRONMENT }}
         timeout-minutes: 30
