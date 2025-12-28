@@ -22,7 +22,7 @@ variable "database_version" {
 variable "tier" {
   description = "Machine tier for Cloud SQL"
   type        = string
-  default     = "db-custom-1-3840"  # 1 vCPU, 3.75 GB RAM (smallest custom tier for PostgreSQL 16)
+  default     = "db-perf-optimized-N-2"  # Smallest performance-optimized tier for PostgreSQL 16 (2 vCPU, 16GB RAM)
 }
 
 variable "disk_size" {
