@@ -492,6 +492,75 @@ Ver mais: [COST_OPTIMIZATION.md](docs/COST_OPTIMIZATION.md)
 
 ## 🐛 Troubleshooting
 
+### Problemas Comuns
+
+#### 1. Terraform State Lock
+**Erro:** `Error acquiring the state lock`
+
+**Solução:**
+```bash
+# Remove lock órfão (o workflow faz isso automaticamente agora)
+gsutil rm gs://tfstate-tx03-f9d2e263/terraform/state/dev/default.tflock
+```
+
+#### 2. Recursos Já Existem
+**Erro:** `Error 409: Already exists`
+
+**Solução:**
+```bash
+# Importar recurso existente para o state
+cd terraform/environments/dev
+terraform import module.gke.google_container_cluster.primary \
+  projects/PROJECT_ID/locations/REGION/clusters/CLUSTER_NAME
+```
+
+#### 3. Permissões Insuficientes
+**Erro:** `Error 403: Permission denied`
+
+**Solução:** Verificar roles do service account:
+```bash
+gcloud projects get-iam-policy PROJECT_ID \
+  --flatten="bindings[].members" \
+  --filter="bindings.members:github-actions-sa@"
+```
+
+Roles necessários:
+- `roles/compute.admin`
+- `roles/container.admin`
+- `roles/cloudsql.admin`
+- `roles/artifactregistry.admin`
+- `roles/storage.admin`
+- `roles/iam.serviceAccountUser`
+
+#### 4. Cloud SQL Tier Incompatível
+**Erro:** `Invalid Tier (db-f1-micro) for (ENTERPRISE_PLUS) Edition`
+
+**Solução:** Usar tier compatível:
+- PostgreSQL 14: `db-g1-small` (recomendado, barato)
+- PostgreSQL 16: `db-perf-optimized-N-2` (caro, ~$150/mês)
+
+#### 5. kubectl Auth Plugin Faltando
+**Erro:** `executable gke-gcloud-auth-plugin not found`
+
+**Solução:** O workflow instala automaticamente agora. Para uso local:
+```bash
+gcloud components install gke-gcloud-auth-plugin
+```
+
+### Documentação Detalhada
+
+Para análise completa de todos os problemas encontrados durante primeira implantação:
+📄 **[TERRAFORM_APPLY_TROUBLESHOOTING.md](./TERRAFORM_APPLY_TROUBLESHOOTING.md)**
+
+Este documento contém:
+- 7 problemas críticos documentados
+- Causa raiz de cada erro
+- Soluções aplicadas
+- Lições aprendidas
+- Recomendações para evitar no futuro
+
+## 🐛 Troubleshooting
+
 ### Problema: "API not enabled"
 
 ```bash

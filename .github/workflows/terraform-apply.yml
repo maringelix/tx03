@@ -50,6 +50,39 @@ jobs:
           gcloud config list
           echo "✅ GCP verification complete!"
 
+      - name: Check Infrastructure State
+        id: check_state
+        continue-on-error: true
+        run: |
+          echo "🔎 Checking existing infrastructure..."
+          
+          # Check if GKE cluster exists
+          if gcloud container clusters describe tx03-gke-cluster --region=us-central1 --project=${{ secrets.GCP_PROJECT_ID }} &>/dev/null; then
+            echo "gke_exists=true" >> $GITHUB_OUTPUT
+            echo "✅ GKE cluster exists"
+          else
+            echo "gke_exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️  GKE cluster not found"
+          fi
+          
+          # Check if Cloud SQL instance exists
+          if gcloud sql instances describe tx03-postgres-2f0f334b --project=${{ secrets.GCP_PROJECT_ID }} &>/dev/null; then
+            echo "sql_exists=true" >> $GITHUB_OUTPUT
+            echo "✅ Cloud SQL instance exists"
+          else
+            echo "sql_exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️  Cloud SQL instance not found"
+          fi
+          
+          # Check if Artifact Registry repo exists
+          if gcloud artifacts repositories describe dx03 --location=us-central1 --project=${{ secrets.GCP_PROJECT_ID }} &>/dev/null; then
+            echo "registry_exists=true" >> $GITHUB_OUTPUT
+            echo "✅ Artifact Registry exists"
+          else
+            echo "registry_exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️  Artifact Registry not found"
+          fi
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -76,16 +109,37 @@ jobs:
           echo "🔓 Checking for stale Terraform lock..."
           gsutil rm gs://${{ secrets.GCS_BUCKET }}/terraform/state/${{ env.ENVIRONMENT }}/default.tflock || echo "No lock file found"
 
-      - name: Terraform Apply
+      - name: Terraform Plan
+        id: plan
         working-directory: terraform/environments/${{ env.ENVIRONMENT }}
-        timeout-minutes: 30
+        continue-on-error: true
         run: |
-          echo "🚀 Applying Terraform changes..."
-          terraform apply -auto-approve \
+          echo "📋 Creating Terraform execution plan..."
+          terraform plan -detailed-exitcode \
             -var="project_id=${{ secrets.GCP_PROJECT_ID }}" \
             -var="environment=${{ env.ENVIRONMENT }}" \
             -var="service_account_email=${{ secrets.WIF_SERVICE_ACCOUNT }}" \
-            -parallelism=10
+            -out=tfplan || EXIT_CODE=$?
+          
+          # Exit codes: 0 = no changes, 1 = error, 2 = changes present
+          if [ "${EXIT_CODE}" == "1" ]; then
+            echo "❌ Terraform plan failed with errors"
+            exit 1
+          elif [ "${EXIT_CODE}" == "2" ]; then
+            echo "plan_has_changes=true" >> $GITHUB_OUTPUT
+            echo "📝 Changes detected, will apply"
+          else
+            echo "plan_has_changes=false" >> $GITHUB_OUTPUT
+            echo "✅ No changes detected"
+          fi
+
+      - name: Terraform Apply
+        if: steps.plan.outputs.plan_has_changes == 'true'
+        working-directory: terraform/environments/${{ env.ENVIRONMENT }}
+        timeout-minutes: 35
+        run: |
+          echo "🚀 Applying Terraform changes..."
+          terraform apply tfplan
           echo "✅ Infrastructure deployed successfully!"
 
       - name: Get Infrastructure Outputs
