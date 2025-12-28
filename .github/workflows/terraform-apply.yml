@@ -120,6 +120,10 @@ jobs:
         if: steps.outputs.outputs.gke_cluster != ''
         run: |
           echo "⚙️  Configuring kubectl..."
+          
+          # Install gke-gcloud-auth-plugin
+          gcloud components install gke-gcloud-auth-plugin --quiet
+          
           gcloud container clusters get-credentials \
             ${{ steps.outputs.outputs.gke_cluster }} \
             --region us-central1 \
