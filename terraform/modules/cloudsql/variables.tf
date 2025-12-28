@@ -16,13 +16,13 @@ variable "instance_name" {
 variable "database_version" {
   description = "PostgreSQL version"
   type        = string
-  default     = "POSTGRES_16"
+  default     = "POSTGRES_14"
 }
 
 variable "tier" {
   description = "Machine tier for Cloud SQL"
   type        = string
-  default     = "db-perf-optimized-N-2"  # Smallest performance-optimized tier for PostgreSQL 16 (2 vCPU, 16GB RAM)
+  default     = "db-g1-small"  # 1 vCPU shared, 1.7GB RAM - affordable tier for PostgreSQL 14
 }
 
 variable "disk_size" {

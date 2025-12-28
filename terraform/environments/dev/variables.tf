@@ -36,7 +36,7 @@ variable "database_instance_name" {
 variable "database_tier" {
   description = "Cloud SQL instance tier"
   type        = string
-  default     = "db-perf-optimized-N-2"
+  default     = "db-g1-small"
 }
 
 variable "service_account_email" {

@@ -58,7 +58,7 @@ module "cloudsql" {
   project_id                = var.project_id
   region                    = var.region
   instance_name             = var.database_instance_name
-  database_version          = "POSTGRES_16"
+  database_version          = "POSTGRES_14"
   tier                      = var.database_tier
   disk_size                 = 10
   database_name             = "dx03"
