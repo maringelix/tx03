@@ -59,7 +59,7 @@ module "cloudsql" {
   region                    = var.region
   instance_name             = var.database_instance_name
   database_version          = "POSTGRES_16"
-  tier                      = "db-f1-micro"
+  tier                      = var.database_tier
   disk_size                 = 10
   database_name             = "dx03"
   database_user             = "dx03"

@@ -33,6 +33,12 @@ variable "database_instance_name" {
   default     = "tx03-postgres"
 }
 
+variable "database_tier" {
+  description = "Cloud SQL instance tier"
+  type        = string
+  default     = "db-custom-1-3840"
+}
+
 variable "service_account_email" {
   description = "Service account email for GitHub Actions"
   type        = string
