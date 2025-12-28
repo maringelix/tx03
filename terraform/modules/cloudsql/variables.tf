@@ -22,7 +22,7 @@ variable "database_version" {
 variable "tier" {
   description = "Machine tier for Cloud SQL"
   type        = string
-  default     = "db-f1-micro"
+  default     = "db-custom-1-3840"  # 1 vCPU, 3.75 GB RAM (smallest custom tier for PostgreSQL 16)
 }
 
 variable "disk_size" {
