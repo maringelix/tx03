@@ -115,17 +115,20 @@ jobs:
         continue-on-error: true
         run: |
           echo "📋 Creating Terraform execution plan..."
+          set +e
           terraform plan -detailed-exitcode \
             -var="project_id=${{ secrets.GCP_PROJECT_ID }}" \
             -var="environment=${{ env.ENVIRONMENT }}" \
             -var="service_account_email=${{ secrets.WIF_SERVICE_ACCOUNT }}" \
-            -out=tfplan || EXIT_CODE=$?
+            -out=tfplan
+          EXIT_CODE=$?
+          set -e
           
           # Exit codes: 0 = no changes, 1 = error, 2 = changes present
-          if [ "${EXIT_CODE}" == "1" ]; then
+          if [ "$EXIT_CODE" == "1" ]; then
             echo "❌ Terraform plan failed with errors"
             exit 1
-          elif [ "${EXIT_CODE}" == "2" ]; then
+          elif [ "$EXIT_CODE" == "2" ]; then
             echo "plan_has_changes=true" >> $GITHUB_OUTPUT
             echo "📝 Changes detected, will apply"
           else
