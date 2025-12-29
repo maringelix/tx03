@@ -125,10 +125,10 @@ jobs:
           set -e
           
           # Exit codes: 0 = no changes, 1 = error, 2 = changes present
-          if [ "$EXIT_CODE" == "1" ]; then
+          if [ "$EXIT_CODE" = "1" ]; then
             echo "❌ Terraform plan failed with errors"
             exit 1
-          elif [ "$EXIT_CODE" == "2" ]; then
+          elif [ "$EXIT_CODE" = "2" ]; then
             echo "plan_has_changes=true" >> $GITHUB_OUTPUT
             echo "📝 Changes detected, will apply"
           else
