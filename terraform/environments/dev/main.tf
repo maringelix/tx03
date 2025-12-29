@@ -93,3 +93,22 @@ module "cloud_armor" {
   ban_duration_sec           = 600
   enable_adaptive_protection = true
 }
+
+# Load Balancer Module (Static IP + SSL Certificate)
+module "loadbalancer" {
+  source = "../../modules/loadbalancer"
+
+  project_id  = var.project_id
+  name_prefix = "tx03-${var.environment}"
+  environment = var.environment
+
+  # For now, just reserve static IP (no SSL yet, no domain)
+  enable_ssl = false
+  domains    = []
+
+  labels = {
+    environment = var.environment
+    project     = "tx03"
+    managed-by  = "terraform"
+  }
+}

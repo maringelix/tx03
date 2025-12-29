@@ -79,3 +79,24 @@ output "cloud_armor_policy_id" {
   description = "ID of the Cloud Armor WAF policy"
   value       = module.cloud_armor.policy_id
 }
+
+# Load Balancer Outputs
+output "loadbalancer_static_ip" {
+  description = "Static IP address for the Load Balancer"
+  value       = module.loadbalancer.static_ip_address
+}
+
+output "loadbalancer_static_ip_name" {
+  description = "Name of the static IP resource"
+  value       = module.loadbalancer.static_ip_name
+}
+
+output "loadbalancer_ssl_certificate_name" {
+  description = "Name of the SSL certificate (if enabled)"
+  value       = module.loadbalancer.ssl_certificate_name
+}
+
+output "loadbalancer_ingress_annotations" {
+  description = "Annotations to add to Kubernetes Ingress"
+  value       = module.loadbalancer.ingress_annotations
+}
