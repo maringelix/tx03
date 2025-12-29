@@ -102,9 +102,9 @@ module "loadbalancer" {
   name_prefix = "tx03-${var.environment}"
   environment = var.environment
 
-  # For now, just reserve static IP (no SSL yet, no domain)
-  enable_ssl = false
-  domains    = []
+  # SSL enabled with dx03.ddns.net domain
+  enable_ssl = true
+  domains    = ["dx03.ddns.net"]
 
   labels = {
     environment = var.environment
