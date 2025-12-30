@@ -93,6 +93,14 @@ prometheus:
       - source_labels: [__meta_kubernetes_namespace]
         target_label: namespace
 
+# Prometheus Operator Configuration
+prometheusOperator:
+  enabled: true
+  # Disable admission webhooks for GKE Autopilot compatibility
+  # Webhooks can cause timeouts and are not essential for basic monitoring
+  admissionWebhooks:
+    enabled: false
+
 # Grafana Configuration
 grafana:
   enabled: true

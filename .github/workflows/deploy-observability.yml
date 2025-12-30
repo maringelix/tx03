@@ -137,7 +137,8 @@ jobs:
           --set alertmanager.enabled=true \
           --set alertmanager.config.useExistingSecret=true \
           --set alertmanager.config.secretName=alertmanager-config \
-          --timeout=10m \
+          --set prometheusOperator.admissionWebhooks.enabled=false \
+          --timeout=20m \
           --wait
         
         echo "✅ Helm chart ${{ github.event.inputs.action }}ed successfully"
