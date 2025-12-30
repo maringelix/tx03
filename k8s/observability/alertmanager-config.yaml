@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-config
+  namespace: monitoring
+type: Opaque
+stringData:
+  alertmanager.yaml: |
+    global:
+      resolve_timeout: 5m
+      slack_api_url: 'SLACK_WEBHOOK_URL_PLACEHOLDER'
+    
+    # Route configuration
+    route:
+      group_by: ['alertname', 'cluster', 'service', 'namespace']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 12h
+      receiver: 'slack-notifications'
+      routes:
+      # Ignore watchdog
+      - match:
+          alertname: Watchdog
+        receiver: 'null'
+      
+      # Critical alerts - immediate notification
+      - match:
+          severity: critical
+        receiver: 'slack-notifications'
+        continue: true
+        group_wait: 0s
+        repeat_interval: 4h
+      
+      # Warning alerts
+      - match:
+          severity: warning
+        receiver: 'slack-notifications'
+        continue: true
+        repeat_interval: 12h
+      
+      # Info alerts - less frequent
+      - match:
+          severity: info
+        receiver: 'slack-notifications'
+        repeat_interval: 24h
+    
+    # Inhibition rules - suppress notifications for related alerts
+    inhibit_rules:
+    - source_match:
+        severity: 'critical'
+      target_match:
+        severity: 'warning'
+      equal: ['alertname', 'namespace', 'pod']
+    
+    # Receivers configuration
+    receivers:
+    - name: 'null'
+    
+    - name: 'slack-notifications'
+      slack_configs:
+      - channel: '#dx03-alerts'
+        title: '🚨 {{ .Status | toUpper }} - DX03 GKE Alert'
+        title_link: 'https://console.cloud.google.com/kubernetes/clusters/details/us-central1/tx03-gke-cluster'
+        text: |
+          *Alert:* {{ .CommonLabels.alertname }}
+          *Severity:* {{ .CommonLabels.severity | toUpper }}
+          *Cluster:* tx03-gke-cluster (GKE)
+          *Namespace:* {{ .CommonLabels.namespace }}
+          {{ if .CommonLabels.pod }}*Pod:* {{ .CommonLabels.pod }}{{ end }}
+          
+          *Summary:* {{ .CommonAnnotations.summary }}
+          *Description:* {{ .CommonAnnotations.description }}
+          
+          *Time:* {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+        send_resolved: true
+        color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'

@@ -1,0 +1,346 @@
+name: 📊 Deploy Observability Stack
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - install
+          - uninstall
+          - upgrade
+        default: install
+      slack_webhook:
+        description: 'Slack Webhook URL (optional)'
+        required: false
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  PROJECT_ID: project-28e61e96-b6ac-4249-a21
+  CLUSTER_NAME: tx03-gke-cluster
+  REGION: us-central1
+  NAMESPACE: monitoring
+
+jobs:
+  deploy-observability:
+    name: ${{ github.event.inputs.action }} Observability Stack
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+    
+    - name: 🔐 Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+    
+    - name: ☁️ Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+      with:
+        project_id: ${{ env.PROJECT_ID }}
+    
+    - name: ☸️ Configure kubectl
+      run: |
+        gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} \
+          --region ${{ env.REGION }} \
+          --project ${{ env.PROJECT_ID }}
+        
+        echo "✅ Kubectl configured"
+        kubectl cluster-info
+        kubectl get nodes
+    
+    - name: 🎯 Setup Helm
+      uses: azure/setup-helm@v4
+      with:
+        version: '3.13.0'
+    
+    - name: 📦 Add Helm Repositories
+      if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
+      run: |
+        echo "📦 Adding Helm repositories..."
+        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+        helm repo update
+        echo "✅ Repositories added and updated"
+    
+    - name: 📁 Create Monitoring Namespace
+      if: github.event.inputs.action == 'install'
+      run: |
+        echo "📁 Creating monitoring namespace..."
+        kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+        echo "✅ Namespace ready"
+    
+    - name: 🔐 Validate Grafana Password Secret
+      if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
+      run: |
+        echo "🔐 Validating GRAFANA_PASSWORD secret..."
+        
+        if [ -z "${{ secrets.GRAFANA_PASSWORD }}" ]; then
+          echo "❌ ERROR: GRAFANA_PASSWORD secret is not configured!"
+          echo ""
+          echo "📝 To configure it:"
+          echo "   1. Go to: https://github.com/${{ github.repository }}/settings/secrets/actions"
+          echo "   2. Click 'New repository secret'"
+          echo "   3. Name: GRAFANA_PASSWORD"
+          echo "   4. Value: <your-strong-password>"
+          echo ""
+          echo "⚠️  Use a strong password for production environments!"
+          exit 1
+        fi
+        
+        PASSWORD_LENGTH=$(echo -n "${{ secrets.GRAFANA_PASSWORD }}" | wc -c)
+        if [ $PASSWORD_LENGTH -lt 8 ]; then
+          echo "⚠️  WARNING: Password is too short (less than 8 characters)"
+          echo "📝 Consider using a stronger password for production"
+        fi
+        
+        echo "✅ GRAFANA_PASSWORD secret is configured (length: $PASSWORD_LENGTH chars)"
+        echo "🔒 Password will be securely applied to Grafana deployment"
+    
+    - name: 🔔 Configure Alertmanager
+      if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
+      env:
+        SLACK_WEBHOOK: ${{ github.event.inputs.slack_webhook || secrets.SLACK_WEBHOOK_URL || 'https://hooks.slack.com/services/PLACEHOLDER' }}
+      run: |
+        echo "🔔 Configuring Alertmanager with Slack notifications..."
+        
+        # Create Alertmanager config from template
+        sed "s|SLACK_WEBHOOK_URL_PLACEHOLDER|${SLACK_WEBHOOK}|g" \
+          k8s/observability/alertmanager-config.yaml | \
+          kubectl apply -f -
+        
+        echo "✅ Alertmanager configuration created"
+    
+    - name: 📊 Install/Upgrade kube-prometheus-stack
+      if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
+      run: |
+        echo "📊 ${{ github.event.inputs.action }}ing kube-prometheus-stack..."
+        
+        helm upgrade --install kube-prometheus-stack \
+          prometheus-community/kube-prometheus-stack \
+          --namespace ${{ env.NAMESPACE }} \
+          --values k8s/observability/prometheus-values.yaml \
+          --set grafana.adminPassword="${{ secrets.GRAFANA_PASSWORD }}" \
+          --set alertmanager.enabled=true \
+          --set alertmanager.config.useExistingSecret=true \
+          --set alertmanager.config.secretName=alertmanager-config \
+          --timeout=10m \
+          --wait
+        
+        echo "✅ Helm chart ${{ github.event.inputs.action }}ed successfully"
+    
+    - name: 📈 Deploy ServiceMonitors
+      if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
+      run: |
+        echo "📈 Deploying ServiceMonitors for DX03..."
+        kubectl apply -f k8s/observability/servicemonitor.yaml
+        echo "✅ ServiceMonitors deployed"
+    
+    - name: 📊 Deploy Grafana Dashboard
+      if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
+      run: |
+        echo "📊 Deploying Grafana Dashboard..."
+        kubectl apply -f k8s/observability/grafana-dashboard.yaml
+        echo "✅ Dashboard deployed"
+    
+    - name: ⏳ Wait for pods to be ready
+      if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
+      run: |
+        echo "⏳ Waiting for Prometheus Operator..."
+        kubectl wait --for=condition=ready pod \
+          -l app.kubernetes.io/name=prometheus-operator \
+          -n ${{ env.NAMESPACE }} \
+          --timeout=300s || true
+        
+        echo "⏳ Waiting for Prometheus..."
+        kubectl wait --for=condition=ready pod \
+          -l app.kubernetes.io/name=prometheus \
+          -n ${{ env.NAMESPACE }} \
+          --timeout=300s || true
+        
+        echo "⏳ Waiting for Grafana..."
+        kubectl wait --for=condition=ready pod \
+          -l app.kubernetes.io/name=grafana \
+          -n ${{ env.NAMESPACE }} \
+          --timeout=300s || true
+        
+        echo "⏳ Waiting for Alertmanager..."
+        kubectl wait --for=condition=ready pod \
+          -l app.kubernetes.io/name=alertmanager \
+          -n ${{ env.NAMESPACE }} \
+          --timeout=300s || true
+        
+        echo "✅ All pods are ready!"
+    
+    - name: 📊 Get deployment status
+      if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
+      run: |
+        echo "========================================"
+        echo "📊 Observability Stack Status"
+        echo "========================================"
+        echo ""
+        
+        echo "=== Pods ==="
+        kubectl get pods -n ${{ env.NAMESPACE }} -o wide
+        
+        echo ""
+        echo "=== Services ==="
+        kubectl get svc -n ${{ env.NAMESPACE }}
+        
+        echo ""
+        echo "=== PersistentVolumeClaims ==="
+        kubectl get pvc -n ${{ env.NAMESPACE }}
+        
+        echo ""
+        echo "=== ServiceMonitors ==="
+        kubectl get servicemonitor -n ${{ env.NAMESPACE }}
+    
+    - name: 📝 Display access instructions
+      if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
+      run: |
+        echo "========================================"
+        echo "✅ Observability Stack Deployed!"
+        echo "========================================"
+        echo ""
+        echo "📊 Access Grafana:"
+        echo "  kubectl port-forward -n ${{ env.NAMESPACE }} svc/kube-prometheus-stack-grafana 8080:80"
+        echo "  http://localhost:8080"
+        echo ""
+        echo "🔑 Credentials:"
+        echo "    Username: admin"
+        echo "    Password: (stored in GRAFANA_PASSWORD secret)"
+        echo ""
+        echo "📈 Access Prometheus:"
+        echo "  kubectl port-forward -n ${{ env.NAMESPACE }} svc/kube-prometheus-stack-prometheus 9090:9090"
+        echo "  http://localhost:9090"
+        echo ""
+        echo "🔔 Access Alertmanager:"
+        echo "  kubectl port-forward -n ${{ env.NAMESPACE }} svc/kube-prometheus-stack-alertmanager 9093:9093"
+        echo "  http://localhost:9093"
+        echo ""
+        echo "📚 Pre-installed Dashboards:"
+        echo "  - DX03 Application Dashboard"
+        echo "  - Kubernetes Cluster Monitoring"
+        echo "  - Node Exporter Full"
+        echo "  - Prometheus Stats"
+        echo ""
+        echo "🔍 Explore targets in Prometheus:"
+        echo "  http://localhost:9090/targets"
+        echo ""
+    
+    - name: 🗑️ Uninstall observability stack
+      if: github.event.inputs.action == 'uninstall'
+      run: |
+        echo "🗑️ Uninstalling observability stack..."
+        
+        # Delete ServiceMonitors
+        kubectl delete -f k8s/observability/servicemonitor.yaml || true
+        
+        # Delete Grafana Dashboard
+        kubectl delete -f k8s/observability/grafana-dashboard.yaml || true
+        
+        # Uninstall Helm chart
+        helm uninstall kube-prometheus-stack -n ${{ env.NAMESPACE }} || true
+        
+        # Wait a bit for resources to be deleted
+        sleep 10
+        
+        # Delete PVCs (optional - uncomment if you want to delete data)
+        # kubectl delete pvc --all -n ${{ env.NAMESPACE }}
+        
+        # Delete namespace (this will remove everything)
+        kubectl delete namespace ${{ env.NAMESPACE }} --wait=false || true
+        
+        echo "✅ Observability stack uninstalled!"
+        echo "⚠️  PVCs were preserved. Delete manually if needed."
+    
+    - name: 📤 Send Slack notification on success
+      if: success() && (github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade')
+      env:
+        SLACK_WEBHOOK: ${{ github.event.inputs.slack_webhook || secrets.SLACK_WEBHOOK_URL }}
+      run: |
+        if [ -n "$SLACK_WEBHOOK" ] && [ "$SLACK_WEBHOOK" != "https://hooks.slack.com/services/PLACEHOLDER" ]; then
+          curl -X POST "$SLACK_WEBHOOK" \
+            -H 'Content-Type: application/json' \
+            -d '{
+              "text": "✅ DX03 Observability Stack Deployed Successfully",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*DX03 Observability Stack Deployed*\n\nPrometheus, Grafana, and Alertmanager are now running on GKE."
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Cluster:*\ntx03-gke-cluster"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Namespace:*\nmonitoring"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Project:*\n${{ env.PROJECT_ID }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Action:*\n${{ github.event.inputs.action }}"
+                    }
+                  ]
+                }
+              ]
+            }'
+        fi
+    
+    - name: 📤 Send Slack notification on failure
+      if: failure()
+      env:
+        SLACK_WEBHOOK: ${{ github.event.inputs.slack_webhook || secrets.SLACK_WEBHOOK_URL }}
+      run: |
+        if [ -n "$SLACK_WEBHOOK" ] && [ "$SLACK_WEBHOOK" != "https://hooks.slack.com/services/PLACEHOLDER" ]; then
+          curl -X POST "$SLACK_WEBHOOK" \
+            -H 'Content-Type: application/json' \
+            -d '{
+              "text": "❌ DX03 Observability Stack Deployment Failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*DX03 Observability Stack Deployment Failed*\n\nCheck the GitHub Actions logs for details."
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Workflow:*\n${{ github.workflow }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Action:*\n${{ github.event.inputs.action }}"
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "<https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Logs>"
+                  }
+                }
+              ]
+            }'
+        fi
