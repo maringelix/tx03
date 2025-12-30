@@ -1,24 +1,5 @@
-# ServiceMonitor for DX03 Application
-# Configures Prometheus to scrape metrics from frontend and backend
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: dx03-frontend-metrics
-  namespace: dx03-dev
-  labels:
-    app: dx03-frontend
-    component: metrics
-spec:
-  selector:
-    app: dx03-frontend
-  ports:
-  - name: metrics
-    port: 80
-    targetPort: 80
-    protocol: TCP
-  type: ClusterIP
+# ServiceMonitor for DX03 Backend
+# Configures Prometheus to scrape metrics from backend API
 
 ---
 apiVersion: v1
@@ -43,29 +24,6 @@ spec:
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: dx03-frontend
-  namespace: monitoring
-  labels:
-    app: dx03-frontend
-    release: kube-prometheus-stack
-spec:
-  selector:
-    matchLabels:
-      app: dx03-frontend
-      component: metrics
-  namespaceSelector:
-    matchNames:
-    - dx03-dev
-  endpoints:
-  - port: metrics
-    path: /metrics
-    interval: 30s
-    scrapeTimeout: 10s
-
----
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
   name: dx03-backend
   namespace: monitoring
   labels:
@@ -81,6 +39,6 @@ spec:
     - dx03-dev
   endpoints:
   - port: metrics
-    path: /api/metrics
+    path: /metrics
     interval: 30s
     scrapeTimeout: 10s
