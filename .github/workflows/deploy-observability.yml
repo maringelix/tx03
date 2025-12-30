@@ -22,9 +22,8 @@ permissions:
   contents: read
 
 env:
-  PROJECT_ID: project-28e61e96-b6ac-4249-a21
+  GCP_REGION: us-central1
   CLUSTER_NAME: tx03-gke-cluster
-  REGION: us-central1
   NAMESPACE: monitoring
 
 jobs:
@@ -46,14 +45,12 @@ jobs:
     
     - name: ☁️ Set up Cloud SDK
       uses: google-github-actions/setup-gcloud@v2
-      with:
-        project_id: ${{ env.PROJECT_ID }}
     
     - name: ☸️ Configure kubectl
       run: |
         gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} \
-          --region ${{ env.REGION }} \
-          --project ${{ env.PROJECT_ID }}
+          --region ${{ env.GCP_REGION }} \
+          --project ${{ secrets.GCP_PROJECT_ID }}
         
         echo "✅ Kubectl configured"
         kubectl cluster-info
@@ -294,7 +291,7 @@ jobs:
                     },
                     {
                       "type": "mrkdwn",
-                      "text": "*Project:*\n${{ env.PROJECT_ID }}"
+                      "text": "*Project:*\n${{ secrets.GCP_PROJECT_ID }}"
                     },
                     {
                       "type": "mrkdwn",
