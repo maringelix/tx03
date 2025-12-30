@@ -124,18 +124,21 @@ grafana:
         isDefault: true
         jsonData:
           timeInterval: 30s
+      
       - name: Google Cloud Monitoring
         type: stackdriver
         access: proxy
         jsonData:
           authenticationType: gce
           defaultProject: project-28e61e96-b6ac-4249-a21
+        editable: false
   
   # Grafana plugins
   plugins:
     - grafana-piechart-panel
     - grafana-clock-panel
     - grafana-simple-json-datasource
+    - grafana-googlecloud-monitoring-datasource
   
   # Dashboard providers
   dashboardProviders:
@@ -197,17 +200,23 @@ prometheusOperator:
     limits:
       memory: 256Mi
       cpu: 200m
+  
+  # Disable kube-system monitoring for GKE Autopilot
+  namespaces:
+    releaseNamespace: true
+    additional:
+    - dx03-dev
+  
+  # Disable kube-controller-manager and kube-scheduler (managed by GKE)
+  kubeletService:
+    enabled: true
+    namespace: kube-system
 
-# Node Exporter - monitor GKE nodes
+# Node Exporter - DISABLED for GKE Autopilot
+# Node Exporter uses hostNetwork and hostPath which are not allowed in Autopilot
+# GKE provides node metrics via Google Cloud Monitoring instead
 nodeExporter:
-  enabled: true
-  resources:
-    requests:
-      memory: 64Mi
-      cpu: 50m
-    limits:
-      memory: 128Mi
-      cpu: 100m
+  enabled: false
 
 # Kube State Metrics - K8s resource metrics
 kubeStateMetrics:
@@ -220,27 +229,49 @@ kubeStateMetrics:
       memory: 256Mi
       cpu: 200m
 
+# Disable monitoring of kube-system components (managed by GKE Autopilot)
+kubeApiServer:
+  enabled: false
+
+kubeControllerManager:
+  enabled: false
+
+kubeScheduler:
+  enabled: false
+
+kubeProxy:
+  enabled: false
+
+kubeEtcd:
+  enabled: false
+
+coreDns:
+  enabled: false
+
+kubeDns:
+  enabled: false
+
 # Default rules (alerts)
 defaultRules:
   create: true
   rules:
     alertmanager: true
-    etcd: false  # Not applicable in GKE
+    etcd: false  # Not applicable in GKE Autopilot
     configReloaders: true
     general: true
     k8s: true
-    kubeApiserverAvailability: true
+    kubeApiserverAvailability: false  # Not applicable in GKE Autopilot (managed control plane)
     kubeApiserverSlos: false  # Disable to reduce noise
     kubelet: true
     kubeProxy: false  # Not applicable in GKE Autopilot
-    kubeScheduler: false  # Not applicable in GKE
+    kubeScheduler: false  # Not applicable in GKE Autopilot (managed)
     kubernetesApps: true
     kubernetesResources: true
     kubernetesStorage: true
-    kubernetesSystem: true
-    node: true
-    nodeExporterAlerting: true
-    nodeExporterRecording: true
+    kubernetesSystem: false  # Disable for Autopilot (managed system components)
+    node: false  # Disabled because Node Exporter is disabled
+    nodeExporterAlerting: false  # Disabled because Node Exporter is disabled
+    nodeExporterRecording: false  # Disabled because Node Exporter is disabled
     prometheus: true
     prometheusOperator: true
 

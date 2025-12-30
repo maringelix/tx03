@@ -152,9 +152,10 @@ jobs:
     - name: 📊 Deploy Grafana Dashboard
       if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
       run: |
-        echo "📊 Deploying Grafana Dashboard..."
+        echo "📊 Deploying Grafana Dashboards..."
         kubectl apply -f k8s/observability/grafana-dashboard.yaml
-        echo "✅ Dashboard deployed"
+        kubectl apply -f k8s/observability/grafana-gke-dashboard.yaml
+        echo "✅ Dashboards deployed"
     
     - name: ⏳ Wait for pods to be ready
       if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
@@ -232,7 +233,8 @@ jobs:
         echo "  http://localhost:9093"
         echo ""
         echo "📚 Pre-installed Dashboards:"
-        echo "  - DX03 Application Dashboard"
+        echo "  - DX03 Application Dashboard (Prometheus metrics)"
+        echo "  - GKE Nodes Dashboard (Cloud Monitoring metrics)"
         echo "  - Kubernetes Cluster Monitoring"
         echo "  - Node Exporter Full"
         echo "  - Prometheus Stats"
