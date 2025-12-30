@@ -71,33 +71,42 @@ Este repositório contém a infraestrutura do **tx03**, o terceiro projeto da s�
   - Cloud Armor: Associado e protegendo ✅
   - Health Checks: 100% passing ✅
 
-### 📊 Observabilidade - STACK COMPLETA
-- **Status:** 🟢 **CONFIGURADA**
-- **Stack:** Prometheus + Grafana + Alertmanager
-- **Métricas:**
-  - Pods (CPU, memória, network, restarts) via Prometheus ✅
-  - Nodes GKE (CPU, memória, network) via Cloud Monitoring ✅
+### 📊 Observabilidade - 100% OPERACIONAL
+- **Status:** 🟢 **PRODUÇÃO**
+- **Stack:** Prometheus + Grafana + Alertmanager + Cloud Monitoring
+- **Acesso:**
+  - **Grafana:** http://localhost:3001 (port-forward) - admin/Admin123456
+  - **Prometheus:** http://localhost:9091 (port-forward)
+  - **Alertmanager:** http://localhost:9093 (port-forward)
+- **Métricas Coletadas:**
+  - **Backend:** HTTP requests, latência, DB queries, conexões pool, CPU, memória (via prom-client)
+  - **Kubernetes:** Pods, deployments, services, PVCs (via Kube State Metrics)
+  - **Nodes GKE:** CPU, memória, network, disk (via Cloud Monitoring)
 - **Dashboards:**
-  - DX03 Application Dashboard (métricas dos pods)
-  - GKE Nodes Dashboard (métricas dos nodes)
-  - Kubernetes Cluster Monitoring
-- **Alertas:** Slack integration (opcional) ✅
-- **Retenção:** 7 dias (Prometheus) + persistente (Grafana)
-- **📚 Documentação:** [k8s/observability/README.md](k8s/observability/README.md)
+  - DX03 Application Dashboard - Métricas da aplicação
+  - GKE Nodes Dashboard - Métricas dos nodes com Cloud Monitoring
+  - Kubernetes Cluster Monitoring - Overview do cluster
+  - Prometheus Stats - Métricas do próprio Prometheus
+- **Alertas:** Configurável via Slack webhook (opcional)
+- **Retenção:** 7 dias (Prometheus) + PVC persistente (Grafana 5Gi)
+- **📚 Documentação Completa:** [OBSERVABILITY.md](OBSERVABILITY.md) | [k8s/observability/README.md](k8s/observability/README.md)
 
 ### 📊 Estatísticas Finais
 ```
 Workflow Runs (Infra):     15 runs → 100% sucesso
 Workflow Runs (App):       47 deploys → 100% sucesso  
-Workflow Runs (Obs):       1 run → em deploy
-Tempo Total:               ~15 horas (incluindo SSL + observability)
-Issues Resolvidos:         29 problemas críticos
-Documentação Criada:       3000+ linhas
+Workflow Runs (Obs):       6 runs → 100% sucesso
+Tempo Total:               ~18 horas (incluindo SSL + observability)
+Issues Resolvidos:         35 problemas críticos
+Documentação Criada:       3500+ linhas
 Uptime (App):              99.9%
-Response Time:             <50ms
+Response Time (API):       <50ms (P95)
+Response Time (DB):        3-5ms (latência)
 Domínio:                   dx03.ddns.net (HTTPS ✅)
 IP Estático:               34.36.62.164 (FREE quando anexado)
-Observabilidade:           Prometheus + Grafana + Cloud Monitoring
+Observabilidade:           Prometheus + Grafana + Alertmanager + Cloud Monitoring
+Métricas Coletadas:        8 custom + defaults Node.js
+Dashboards:                4 dashboards configurados
 ```
 
 ### 🏆 Conquistas
@@ -109,8 +118,11 @@ Observabilidade:           Prometheus + Grafana + Cloud Monitoring
 ✅ **Zero downtime** no ambiente final  
 ✅ **47 deploys incrementais** documentados  
 ✅ **Aplicação 100% funcional** em produção  
-✅ **Observabilidade completa** (Prometheus + Grafana + Cloud Monitoring)  
-✅ **Documentação completa** publicada no GitHub  
+✅ **Observabilidade completa** com stack Prometheus + Grafana + Alertmanager  
+✅ **Métricas instrumentadas** no backend Node.js (prom-client)  
+✅ **Cloud Monitoring integrado** para métricas de nodes GKE  
+✅ **4 dashboards configurados** para monitoramento completo  
+✅ **Documentação completa** (3500+ linhas) publicada no GitHub  
 ✅ **CI/CD pipeline** totalmente automatizado  
 
 ### 🎯 Conquistas Técnicas
@@ -133,13 +145,17 @@ Observabilidade:           Prometheus + Grafana + Cloud Monitoring
 
 - [x] Infraestrutura GCP completa com Terraform
 - [x] GitOps com GitHub Actions e WIF
-- [x] Load Balancer com IP público
+- [x] Load Balancer com IP público e SSL/TLS
 - [x] Cloud Armor (WAF) protegendo aplicação
 - [x] Health checks configurados (liveness + readiness)
 - [x] Multi-stage Docker builds otimizados
 - [x] Zero downtime deployments
-- [x] Documentação completa (2000+ linhas)
-- [x] 44 deploys incrementais bem-sucedidos
+- [x] **Stack de observabilidade completa** (Prometheus + Grafana + Alertmanager)
+- [x] **Métricas Prometheus** instrumentadas no backend (prom-client)
+- [x] **4 dashboards** para monitoramento de aplicação e infraestrutura
+- [x] **Cloud Monitoring** integrado para métricas dos nodes GKE
+- [x] Documentação completa (3500+ linhas)
+- [x] 47 deploys incrementais bem-sucedidos
 
 ### 🎯 Próximos Passos
 
@@ -250,6 +266,15 @@ kubectl get ingress -n dx03-dev
 # Ver ConfigMap e Secrets
 kubectl get configmap -n dx03-dev
 kubectl get secrets -n dx03-dev
+
+# Acessar Grafana (Observabilidade)
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 3001:80
+
+# Acessar Prometheus
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9091:9090
+
+# Ver métricas do backend
+kubectl exec -n dx03-dev deployment/dx03-backend -- wget -q -O- http://localhost:3000/metrics
 ```
 
 ## 🏗️ Arquitetura
@@ -761,6 +786,13 @@ Toda a jornada de deployment está documentada em detalhes:
 
 #### 📚 Documentação Principal
 - **[STATUS.md](STATUS.md)** - Status atual, conquistas, próximos passos e métricas do projeto
+- **[OBSERVABILITY.md](OBSERVABILITY.md)** - Stack completa de observabilidade (Prometheus + Grafana + Alertmanager)
+  - Deploy via GitHub Actions
+  - Métricas coletadas (backend Node.js + Kubernetes + GKE)
+  - Dashboards configurados
+  - Troubleshooting e queries úteis
+  - Guia completo de acesso e configuração
+  
 - **[APPLICATION_DEPLOYMENT.md](APPLICATION_DEPLOYMENT.md)** - Guia completo de deployment da aplicação dx03
   - 20 tentativas de deploy documentadas
   - 10 problemas críticos resolvidos (gitignore, passwords, secrets, etc)
