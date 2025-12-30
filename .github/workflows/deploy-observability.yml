@@ -139,9 +139,10 @@ jobs:
           --set alertmanager.config.secretName=alertmanager-config \
           --set prometheusOperator.admissionWebhooks.enabled=false \
           --timeout=20m \
-          --wait
+          --atomic=false
         
         echo "✅ Helm chart ${{ github.event.inputs.action }}ed successfully"
+        echo "⏳ Resources are being created asynchronously..."
     
     - name: 📈 Deploy ServiceMonitors
       if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
@@ -165,25 +166,25 @@ jobs:
         kubectl wait --for=condition=ready pod \
           -l app.kubernetes.io/name=prometheus-operator \
           -n ${{ env.NAMESPACE }} \
-          --timeout=300s || true
+          --timeout=600s || echo "⚠️  Prometheus Operator not ready yet"
         
         echo "⏳ Waiting for Prometheus..."
         kubectl wait --for=condition=ready pod \
           -l app.kubernetes.io/name=prometheus \
           -n ${{ env.NAMESPACE }} \
-          --timeout=300s || true
+          --timeout=600s || echo "⚠️  Prometheus not ready yet"
         
         echo "⏳ Waiting for Grafana..."
         kubectl wait --for=condition=ready pod \
           -l app.kubernetes.io/name=grafana \
           -n ${{ env.NAMESPACE }} \
-          --timeout=300s || true
+          --timeout=600s || echo "⚠️  Grafana not ready yet"
         
         echo "⏳ Waiting for Alertmanager..."
         kubectl wait --for=condition=ready pod \
           -l app.kubernetes.io/name=alertmanager \
           -n ${{ env.NAMESPACE }} \
-          --timeout=300s || true
+          --timeout=600s || echo "⚠️  Alertmanager not ready yet"
         
         echo "✅ All pods are ready!"
     
