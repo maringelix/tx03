@@ -191,6 +191,7 @@ grafana:
 
 # Alertmanager Configuration
 alertmanager:
+  enabled: true
   alertmanagerSpec:
     # Storage
     storage:
