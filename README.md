@@ -51,29 +51,37 @@ Este repositório contém a infraestrutura do **tx03**, o terceiro projeto da s�
   - VPC Network + Subnets (ACTIVE)
   - Artifact Registry: `dx03` (ACTIVE)
   - Cloud Armor WAF: `tx03-waf-policy` (PROTECTING)
-  - Load Balancer: **34.54.86.122** (PROVISIONED)
+  - **Load Balancer:** HTTP(S) Load Balancer com IP estático
+  - **IP Estático:** `34.36.62.164` (RESERVED)
+  - **Domínio:** dx03.ddns.net (HTTP ✅ / HTTPS ⏳)
+  - **SSL Certificate:** Google-managed (PROVISIONING)
   - Cloud NAT (ROUTING)
 
 ### ✅ Aplicação (dx03) - 100% OPERACIONAL EM PRODUÇÃO
-- **Status:** 🟢 **LIVE: http://34.54.86.122**
+- **Status:** 🟢 **LIVE**
+  - **HTTP:** http://dx03.ddns.net (34.36.62.164)
+  - **HTTPS:** https://dx03.ddns.net (certificado provisionando)
 - **Deploy Time:** 5-6 minutos (média)
 - **Componentes:**
   - Frontend: 2/2 pods running ✅
   - Backend: 2/2 pods running ✅
   - Database: Connected (3-5ms latency) ✅
-  - Load Balancer: Provisionado ✅
+  - Load Balancer: HTTP(S) com IP estático ✅
+  - SSL Certificate: ManagedCertificate (provisioning) ⏳
   - Cloud Armor: Associado e protegendo ✅
   - Health Checks: 100% passing ✅
 
 ### 📊 Estatísticas Finais
 ```
-Workflow Runs (Infra):     11 runs → 100% sucesso
-Workflow Runs (App):       44 deploys → 100% sucesso  
-Tempo Total:               ~12 horas (incluindo 44 deploys incrementais)
-Issues Resolvidos:         24 problemas críticos
-Documentação Criada:       2000+ linhas
+Workflow Runs (Infra):     15 runs → 100% sucesso
+Workflow Runs (App):       47 deploys → 100% sucesso  
+Tempo Total:               ~14 horas (incluindo SSL setup)
+Issues Resolvidos:         26 problemas críticos
+Documentação Criada:       2500+ linhas
 Uptime (App):              99.9%
 Response Time:             <50ms
+Domínio:                   dx03.ddns.net (HTTP ✅)
+IP Estático:               34.36.62.164 (FREE quando anexado)
 ```
 
 ### 🏆 Conquistas
@@ -415,7 +423,12 @@ tx03/
 │   │   ├── cloudsql/                  # Cloud SQL module
 │   │   ├── networking/                # VPC, Subnets, Firewall
 │   │   ├── artifact-registry/         # Container registry
-│   │   ├── load-balancer/             # LB + Cloud Armor
+│   │   ├── cloud-armor/               # WAF policies
+│   │   ├── loadbalancer/              # ⭐ Static IP + SSL Certificate
+│   │   │   ├── main.tf                # Recursos GCP
+│   │   │   ├── variables.tf           # enable_ssl, domains
+│   │   │   ├── outputs.tf             # IP, certificate, annotations
+│   │   │   └── README.md              # Documentação
 │   │   └── iam/                       # Service accounts & roles
 │   │
 │   └── environments/
@@ -607,14 +620,25 @@ Ver mais: [COST_OPTIMIZATION.md](docs/COST_OPTIMIZATION.md)
 - [x] **✅ Deploy dx03**: Aplicação 100% operacional em produção
   - Docker images built e pushed para Artifact Registry ✅
   - Frontend e backend deployados (2 replicas cada) ✅
-  - Load Balancer provisionado: **IP 34.54.86.122** ✅
+  - Load Balancer HTTP(S) provisionado ✅
+  - **IP Estático:** 34.36.62.164 (RESERVED) ✅
+  - **Domínio:** dx03.ddns.net (HTTP ativo) ✅
   - Kubernetes Secrets configurados ✅
   - Cloud Armor associado aos backend services ✅
   - Health checks: 100% passing ✅
-  - **Live Demo:** http://34.54.86.122
-  - 44 deploys incrementais bem-sucedidos
+  - **Live Demo:** http://dx03.ddns.net
+  - 47 deploys incrementais bem-sucedidos
 
-#### Fase 7: Observabilidade (Parcial ⚠️)
+#### Fase 7: SSL/TLS e Segurança (Em Progresso ⏳)
+- [x] **✅ IP Estático Reservado**: 34.36.62.164 (via Terraform)
+- [x] **✅ Módulo Load Balancer**: Terraform module criado
+- [x] **✅ Domínio DNS**: dx03.ddns.net configurado (NoIP)
+- [x] **✅ ManagedCertificate**: Kubernetes resource para SSL
+- [x] **⏳ SSL Certificate**: Google-managed (PROVISIONING - 15-60 min)
+- [ ] **⏳ HTTPS Ativo**: Aguardando provisão do certificado
+- [ ] **Redirect HTTP → HTTPS**: Após certificado ativo
+
+#### Fase 8: Observabilidade (Parcial ⚠️)
 - [x] **✅ Cloud Monitoring**: Métricas automáticas de GKE e Cloud SQL
 - [x] **✅ Cloud Logging**: Logs de aplicação e infraestrutura
 - [ ] **⏳ Dashboards Customizados**: Pendente configuração
@@ -623,11 +647,9 @@ Ver mais: [COST_OPTIMIZATION.md](docs/COST_OPTIMIZATION.md)
 ### 🎯 Próximos Passos Opcionais
 
 #### Melhorias de Produção
-- [ ] **Reservar IP Estático**: Para Load Balancer (evitar mudanças)
-- [ ] **Certificado SSL/TLS**: Google-managed ou Let's Encrypt
-- [ ] **Redirect HTTP → HTTPS**: Forçar conexão segura
 - [ ] **Uptime Checks**: Monitoramento com alertas
 - [ ] **HPA (Horizontal Pod Autoscaler)**: Escala automática
+- [ ] **Backup Strategy**: Snapshots automatizados do Cloud SQL
 
 #### Otimizações Avançadas
 - [ ] **Cost Optimization**: Budget alerts, committed use discounts
