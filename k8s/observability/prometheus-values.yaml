@@ -158,12 +158,10 @@ grafana:
           defaultProject: project-28e61e96-b6ac-4249-a21
         editable: false
   
-  # Grafana plugins
+  # Grafana plugins - Note: Angular plugins removed (not supported in Grafana 11+)
+  # Cloud Monitoring datasource is built-in to Grafana, no plugin needed
   plugins:
-    - grafana-piechart-panel
     - grafana-clock-panel
-    - grafana-simple-json-datasource
-    - grafana-googlecloud-monitoring-datasource
   
   # Dashboard providers
   dashboardProviders:
