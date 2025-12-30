@@ -38,6 +38,23 @@ prometheus:
     serviceMonitorSelectorNilUsesHelmValues: false
     podMonitorSelectorNilUsesHelmValues: false
     
+    # Restrict monitoring to specific namespaces only (avoid kube-system)
+    serviceMonitorNamespaceSelector:
+      matchExpressions:
+      - key: name
+        operator: In
+        values:
+        - monitoring
+        - dx03-dev
+    
+    podMonitorNamespaceSelector:
+      matchExpressions:
+      - key: name
+        operator: In
+        values:
+        - monitoring
+        - dx03-dev
+    
     # Additional scrape configs for DX03
     additionalScrapeConfigs:
     - job_name: 'dx03-frontend'
@@ -215,6 +232,9 @@ prometheusOperator:
 # Node Exporter - DISABLED for GKE Autopilot
 # Node Exporter uses hostNetwork and hostPath which are not allowed in Autopilot
 # GKE provides node metrics via Google Cloud Monitoring instead
+prometheus-node-exporter:
+  enabled: false
+
 nodeExporter:
   enabled: false
 
