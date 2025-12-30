@@ -53,21 +53,21 @@ Este repositório contém a infraestrutura do **tx03**, o terceiro projeto da s�
   - Cloud Armor WAF: `tx03-waf-policy` (PROTECTING)
   - **Load Balancer:** HTTP(S) Load Balancer com IP estático
   - **IP Estático:** `34.36.62.164` (RESERVED)
-  - **Domínio:** dx03.ddns.net (HTTP ✅ / HTTPS ⏳)
-  - **SSL Certificate:** Google-managed (PROVISIONING)
+  - **Domínio:** dx03.ddns.net (HTTP ✅ / HTTPS ✅)
+  - **SSL Certificate:** Google-managed ✅ ATIVO (válido até 29/03/2026)
   - Cloud NAT (ROUTING)
 
 ### ✅ Aplicação (dx03) - 100% OPERACIONAL EM PRODUÇÃO
 - **Status:** 🟢 **LIVE**
   - **HTTP:** http://dx03.ddns.net (34.36.62.164)
-  - **HTTPS:** https://dx03.ddns.net (certificado provisionando)
+  - **HTTPS:** https://dx03.ddns.net ✅ (certificado ativo!)
 - **Deploy Time:** 5-6 minutos (média)
 - **Componentes:**
   - Frontend: 2/2 pods running ✅
   - Backend: 2/2 pods running ✅
   - Database: Connected (3-5ms latency) ✅
   - Load Balancer: HTTP(S) com IP estático ✅
-  - SSL Certificate: ManagedCertificate (provisioning) ⏳
+  - SSL Certificate: ManagedCertificate ✅ ATIVO
   - Cloud Armor: Associado e protegendo ✅
   - Health Checks: 100% passing ✅
 
@@ -629,14 +629,14 @@ Ver mais: [COST_OPTIMIZATION.md](docs/COST_OPTIMIZATION.md)
   - **Live Demo:** http://dx03.ddns.net
   - 47 deploys incrementais bem-sucedidos
 
-#### Fase 7: SSL/TLS e Segurança (Em Progresso ⏳)
+#### Fase 7: SSL/TLS e Segurança (Concluída ✅)
 - [x] **✅ IP Estático Reservado**: 34.36.62.164 (via Terraform)
 - [x] **✅ Módulo Load Balancer**: Terraform module criado
 - [x] **✅ Domínio DNS**: dx03.ddns.net configurado (NoIP)
 - [x] **✅ ManagedCertificate**: Kubernetes resource para SSL
-- [x] **⏳ SSL Certificate**: Google-managed (PROVISIONING - 15-60 min)
-- [ ] **⏳ HTTPS Ativo**: Aguardando provisão do certificado
-- [ ] **Redirect HTTP → HTTPS**: Após certificado ativo
+- [x] **✅ SSL Certificate**: Google-managed ATIVO (válido até 29/03/2026)
+- [x] **✅ HTTPS Ativo**: https://dx03.ddns.net funcionando
+- [ ] **Redirect HTTP → HTTPS**: Opcional (após configuração)
 
 #### Fase 8: Observabilidade (Parcial ⚠️)
 - [x] **✅ Cloud Monitoring**: Métricas automáticas de GKE e Cloud SQL
