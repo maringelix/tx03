@@ -157,41 +157,34 @@ jobs:
           
           echo "✅ Addons installed"
 
-      - name: 🔄 Restart Pods for Sidecar Injection
+      - name: ⚠️ Manual Steps Required
         if: inputs.action == 'install' || inputs.action == 'upgrade'
         run: |
-          echo "🔄 Restarting dx03 pods to inject sidecars..."
-          
-          kubectl rollout restart deployment/dx03-backend -n dx03-dev
-          kubectl rollout restart deployment/dx03-frontend -n dx03-dev
-          
-          echo "⏳ Waiting for rollout to complete..."
-          kubectl rollout status deployment/dx03-backend -n dx03-dev --timeout=300s
-          kubectl rollout status deployment/dx03-frontend -n dx03-dev --timeout=300s
-          
-          echo "✅ Pods restarted with sidecars"
-          
-      - name: 🌐 Apply Istio Configurations
-        if: inputs.action == 'install' || inputs.action == 'upgrade'
-        run: |
-          echo "🌐 Applying Istio configurations (PERMISSIVE mode)..."
-          
-          if [ -f "k8s/istio/gateway.yaml" ]; then
-            kubectl apply -f k8s/istio/gateway.yaml
-            echo "✅ Gateway applied"
-          fi
-          
-          if [ -f "k8s/istio/telemetry.yaml" ]; then
-            kubectl apply -f k8s/istio/telemetry.yaml
-            echo "✅ Telemetry applied"
-          fi
-          
-          if [ -f "k8s/istio/security.yaml" ]; then
-            kubectl apply -f k8s/istio/security.yaml
-            echo "✅ Security policies applied (PERMISSIVE mTLS)"
-          fi
-          
-          echo "✅ All Istio configurations applied!"
+          echo "======================================================================"
+          echo "✅ Istio Service Mesh Installed Successfully!"
+          echo "======================================================================"
+          echo ""
+          echo "⚠️  IMPORTANT: Manual steps required to complete setup:"
+          echo ""
+          echo "1️⃣  Restart pods to inject sidecars:"
+          echo "    kubectl rollout restart deployment/dx03-backend -n dx03-dev"
+          echo "    kubectl rollout restart deployment/dx03-frontend -n dx03-dev"
+          echo ""
+          echo "2️⃣  Wait for pods to be ready:"
+          echo "    kubectl rollout status deployment/dx03-backend -n dx03-dev"
+          echo "    kubectl rollout status deployment/dx03-frontend -n dx03-dev"
+          echo ""
+          echo "3️⃣  Apply Istio configurations:"
+          echo "    kubectl apply -f k8s/istio/gateway.yaml"
+          echo "    kubectl apply -f k8s/istio/telemetry.yaml"
+          echo "    kubectl apply -f k8s/istio/security.yaml"
+          echo ""
+          echo "4️⃣  Verify installation:"
+          echo "    kubectl get pods -n dx03-dev"
+          echo "    kubectl get pods -n istio-system"
+          echo "    istioctl proxy-status"
+          echo ""
+          echo "======================================================================"
 
       - name: 📊 Display Istio Status
         if: inputs.action == 'install' || inputs.action == 'upgrade'
