@@ -157,16 +157,19 @@ jobs:
           
           echo "✅ Addons installed"
 
-      - name: 🌐 Apply Istio Configuration
+      - name: 🌐 Apply Istio Gateway and Telemetry
         if: inputs.action == 'install' || inputs.action == 'upgrade'
         run: |
-          echo "🌐 Applying Istio configurations..."
+          echo "🌐 Applying Gateway and Telemetry configurations first..."
           
-          if [ -d "k8s/istio" ]; then
-            kubectl apply -f k8s/istio/
-            echo "✅ Istio configurations applied"
-          else
-            echo "⚠️ No Istio configurations found in k8s/istio/"
+          if [ -f "k8s/istio/gateway.yaml" ]; then
+            kubectl apply -f k8s/istio/gateway.yaml
+            echo "✅ Gateway configuration applied"
+          fi
+          
+          if [ -f "k8s/istio/telemetry.yaml" ]; then
+            kubectl apply -f k8s/istio/telemetry.yaml
+            echo "✅ Telemetry configuration applied"
           fi
 
       - name: 🔄 Restart Pods for Sidecar Injection
@@ -182,6 +185,16 @@ jobs:
           kubectl rollout status deployment/dx03-frontend -n dx03-dev --timeout=300s
           
           echo "✅ Pods restarted with sidecars"
+
+      - name: 🔐 Apply Security Policies
+        if: inputs.action == 'install' || inputs.action == 'upgrade'
+        run: |
+          echo "🔐 Applying security policies after pods are ready..."
+          
+          if [ -f "k8s/istio/security.yaml" ]; then
+            kubectl apply -f k8s/istio/security.yaml
+            echo "✅ Security policies applied"
+          fi
 
       - name: 📊 Display Istio Status
         if: inputs.action == 'install' || inputs.action == 'upgrade'
