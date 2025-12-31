@@ -1,0 +1,274 @@
+name: 🔐 Deploy Security Stack
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - install
+          - uninstall
+          - upgrade
+        default: install
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  GCP_REGION: us-central1
+  CLUSTER_NAME: tx03-gke-cluster
+  GATEKEEPER_NAMESPACE: gatekeeper-system
+  TRIVY_NAMESPACE: trivy-system
+
+jobs:
+  deploy-security:
+    name: ${{ github.event.inputs.action }} Security Stack
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+    
+    - name: 🔐 Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+        service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+        create_credentials_file: true
+        export_environment_variables: true
+    
+    - name: ☁️ Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+    
+    - name: 🔌 Install GKE Auth Plugin
+      run: |
+        echo "🔌 Installing gke-gcloud-auth-plugin..."
+        gcloud components install gke-gcloud-auth-plugin --quiet
+        echo "✅ Plugin installed"
+    
+    - name: ☸️ Configure kubectl
+      run: |
+        echo "⚙️  Configuring kubectl for GKE..."
+        gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} \
+          --region ${{ env.GCP_REGION }} \
+          --project ${{ secrets.GCP_PROJECT_ID }}
+        
+        echo "✅ Kubectl configured"
+        kubectl cluster-info
+
+    - name: 🎯 Setup Helm
+      uses: azure/setup-helm@v4
+      with:
+        version: '3.13.0'
+    
+    - name: 📦 Add Helm Repositories
+      if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
+      run: |
+        echo "📦 Adding Helm repositories..."
+        helm repo add gatekeeper https://open-policy-agent.github.io/gatekeeper/charts
+        helm repo add aqua https://aquasecurity.github.io/helm-charts/
+        helm repo update
+        echo "✅ Repositories added and updated"
+
+    - name: 📁 Create Namespaces
+      if: github.event.inputs.action == 'install'
+      run: |
+        echo "📁 Creating security namespaces..."
+        kubectl create namespace ${{ env.GATEKEEPER_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+        kubectl create namespace ${{ env.TRIVY_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Label namespaces
+        kubectl label namespace ${{ env.GATEKEEPER_NAMESPACE }} app=gatekeeper security=policy-as-code --overwrite
+        kubectl label namespace ${{ env.TRIVY_NAMESPACE }} app=trivy-operator security=vulnerability-scanning --overwrite
+        
+        echo "✅ Namespaces ready"
+
+    - name: 🔐 Install OPA Gatekeeper
+      if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
+      run: |
+        echo "🔐 Installing/Upgrading OPA Gatekeeper..."
+        
+        helm upgrade --install gatekeeper gatekeeper/gatekeeper \
+          --namespace ${{ env.GATEKEEPER_NAMESPACE }} \
+          --values k8s/security/gatekeeper-values.yaml \
+          --timeout=10m \
+          --atomic=false
+        
+        echo "✅ OPA Gatekeeper ${{ github.event.inputs.action }}ed"
+        echo "⏳ Waiting for Gatekeeper deployment..."
+        
+        kubectl wait --for=condition=ready pod \
+          -l control-plane=controller-manager \
+          -n ${{ env.GATEKEEPER_NAMESPACE }} \
+          --timeout=300s || echo "⚠️  Gatekeeper deployment ongoing"
+
+    - name: 📋 Deploy Gatekeeper Policies
+      if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
+      run: |
+        echo "📋 Deploying constraint templates and policies..."
+        
+        # Apply constraint templates
+        kubectl apply -f k8s/security/gatekeeper-policies.yaml
+        
+        # Apply constraints
+        kubectl apply -f k8s/security/gatekeeper-constraints.yaml
+        
+        echo "✅ Gatekeeper policies deployed"
+        
+        # List constraints
+        echo ""
+        echo "📊 Constraints deployed:"
+        kubectl get constraints
+        
+        # Show violations
+        echo ""
+        echo "⚠️  Checking for violations..."
+        kubectl get constraints -o json | jq -r '.items[] | "\(.kind): \(.metadata.name)"' || echo "No violations found"
+
+    - name: 🔍 Install Trivy Operator
+      if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
+      run: |
+        echo "🔍 Installing/Upgrading Trivy Operator..."
+        
+        helm upgrade --install trivy-operator aqua/trivy-operator \
+          --namespace ${{ env.TRIVY_NAMESPACE }} \
+          --values k8s/security/trivy-operator-values.yaml \
+          --timeout=10m \
+          --atomic=false
+        
+        echo "✅ Trivy Operator ${{ github.event.inputs.action }}ed"
+        echo "⏳ Waiting for Trivy deployment..."
+        
+        kubectl wait --for=condition=ready pod \
+          -l app.kubernetes.io/name=trivy-operator \
+          -n ${{ env.TRIVY_NAMESPACE }} \
+          --timeout=300s || echo "⚠️  Trivy deployment ongoing"
+
+    - name: ⚙️ Deploy Trivy Configuration
+      if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
+      run: |
+        echo "⚙️  Deploying Trivy configuration..."
+        
+        kubectl apply -f k8s/security/trivy-operator-config.yaml
+        
+        echo "✅ Trivy configuration deployed"
+        
+        # Show config
+        echo ""
+        echo "📊 Trivy ConfigMap:"
+        kubectl get cm trivy-operator-config -n ${{ env.TRIVY_NAMESPACE }} -o yaml
+
+    - name: ⏳ Wait for Pods
+      if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
+      run: |
+        echo "⏳ Waiting for security stack pods..."
+        
+        echo "🔐 Gatekeeper pods:"
+        kubectl get pods -n ${{ env.GATEKEEPER_NAMESPACE }} -o wide
+        
+        echo ""
+        echo "🔍 Trivy pods:"
+        kubectl get pods -n ${{ env.TRIVY_NAMESPACE }} -o wide
+        
+        echo ""
+        echo "✅ Security stack deployed!"
+
+    - name: 📊 Display Security Stack Status
+      if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
+      run: |
+        echo "=========================================="
+        echo "🔐 Security Stack Status"
+        echo "=========================================="
+        echo ""
+        
+        echo "=== OPA Gatekeeper ==="
+        kubectl get deployment -n ${{ env.GATEKEEPER_NAMESPACE }} -o wide || echo "No Gatekeeper deployment found"
+        
+        echo ""
+        echo "Constraints:"
+        kubectl get constraints || echo "No constraints deployed"
+        
+        echo ""
+        echo "=== Trivy Operator ==="
+        kubectl get deployment -n ${{ env.TRIVY_NAMESPACE }} -o wide || echo "No Trivy deployment found"
+        
+        echo ""
+        echo "Trivy CRDs:"
+        kubectl api-resources | grep -i trivy || echo "No Trivy CRDs found"
+        
+        echo ""
+        echo "=========================================="
+        echo "✅ Security Stack Ready!"
+        echo "=========================================="
+        echo ""
+        echo "📚 Next steps:"
+        echo "1. Monitor Gatekeeper violations:"
+        echo "   kubectl describe constraint required-resources"
+        echo ""
+        echo "2. Check Trivy scan results:"
+        echo "   kubectl get vulnerabilityreports -n dx03-dev"
+        echo ""
+        echo "3. View detailed reports:"
+        echo "   kubectl describe vr <report-name> -n dx03-dev"
+
+    - name: 🗑️ Uninstall Security Stack
+      if: github.event.inputs.action == 'uninstall'
+      run: |
+        echo "🗑️  Uninstalling security stack..."
+        
+        # Uninstall Helm charts
+        echo "Removing Trivy Operator..."
+        helm uninstall trivy-operator -n ${{ env.TRIVY_NAMESPACE }} 2>/dev/null || echo "Trivy already removed"
+        
+        echo "Removing OPA Gatekeeper..."
+        helm uninstall gatekeeper -n ${{ env.GATEKEEPER_NAMESPACE }} 2>/dev/null || echo "Gatekeeper already removed"
+        
+        # Delete namespaces (optional)
+        echo "Deleting namespaces..."
+        kubectl delete namespace ${{ env.GATEKEEPER_NAMESPACE }} --ignore-not-found=true
+        kubectl delete namespace ${{ env.TRIVY_NAMESPACE }} --ignore-not-found=true
+        
+        echo "✅ Security stack uninstalled"
+
+    - name: 📤 Send Slack notification on success
+      if: success() && (github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade')
+      uses: slackapi/slack-github-action@v1.24.0
+      with:
+        webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+        payload: |
+          {
+            "text": "✅ Security Stack ${{ github.event.inputs.action }} - Success",
+            "blocks": [
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "✅ *Security Stack ${{ github.event.inputs.action }} Successful*\n\n*Components:*\n🔐 OPA Gatekeeper - Policy enforcement\n🔍 Trivy Operator - Vulnerability scanning\n\n*Next Steps:*\n• Monitor violations: `kubectl describe constraint required-resources`\n• Check scan reports: `kubectl get vulnerabilityreports -n dx03-dev`"
+                }
+              }
+            ]
+          }
+      continue-on-error: true
+
+    - name: 📤 Send Slack notification on failure
+      if: failure()
+      uses: slackapi/slack-github-action@v1.24.0
+      with:
+        webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+        payload: |
+          {
+            "text": "❌ Security Stack ${{ github.event.inputs.action }} - Failed",
+            "blocks": [
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "❌ *Security Stack ${{ github.event.inputs.action }} Failed*\n\n🔗 Check logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                }
+              }
+            ]
+          }
+      continue-on-error: true

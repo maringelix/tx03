@@ -1,0 +1,91 @@
+# Trivy Operator Helm Values
+# Kubernetes-native security scanning
+
+image:
+  registry: ghcr.io
+  repository: aquasecurity/trivy-operator
+  tag: "0.19.0"
+  pullPolicy: IfNotPresent
+
+operator:
+  replicas: 1
+
+  logLevel: "info"
+  scanJobTimeout: "5m"
+  vulnerabilityScannersEnabled: true
+  configAuditScannersEnabled: true
+  rbacAssessmentScannerEnabled: true
+  infraAssessmentScannerEnabled: true
+  dangerousSecurityPoliciesEnabled: true
+  kubeVersion: "1.29"
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+trivyImage:
+  registry: ghcr.io
+  repository: aquasecurity/trivy
+  tag: "0.48.0"
+
+trivyServerURL: "http://trivy-server:4954"
+
+# ServiceAccount
+serviceAccount:
+  create: true
+  name: trivy-operator
+
+# RBAC
+rbac:
+  create: true
+
+# Pod Security Policy
+podSecurityPolicy:
+  enforce: true
+
+# Network Policy
+networkPolicy:
+  enabled: true
+
+# Priority class
+priorityClassName: ""
+
+# Node selector for GKE
+nodeSelector:
+  kubernetes.io/os: linux
+
+# Affinity rules
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        preference:
+          matchExpressions:
+            - key: cloud.google.com/gke-nodepool
+              operator: In
+              values:
+                - default-pool
+
+# Tolerations for GKE
+tolerations: []
+
+# VulnerabilityReports retention
+vulnReportRetention: "24h"
+
+# ClusterRbacAssessmentReport retention
+clusterRbacReportRetention: "24h"
+
+# ClusterConfigAuditReport retention
+clusterConfigReportRetention: "24h"
+
+# InfraAssessmentReport retention
+infraReportRetention: "24h"
+
+# Metrics
+metrics:
+  enabled: true
+  port: 8080

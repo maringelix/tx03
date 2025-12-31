@@ -1,0 +1,78 @@
+---
+# Enforce all Gatekeeper constraints
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredResources
+metadata:
+  name: required-resources
+spec:
+  match:
+    excludedNamespaces:
+      - gatekeeper-system
+      - kube-system
+      - kube-public
+      - kube-node-lease
+  parameters:
+    requiredResources:
+      - cpu
+      - memory
+
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredImagePolicy
+metadata:
+  name: required-image-policy
+spec:
+  match:
+    excludedNamespaces:
+      - gatekeeper-system
+      - kube-system
+      - kube-public
+
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sNoPrivileged
+metadata:
+  name: no-privileged
+spec:
+  match:
+    excludedNamespaces:
+      - gatekeeper-system
+      - kube-system
+
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sBlockLatestImage
+metadata:
+  name: block-latest-image
+spec:
+  match:
+    excludedNamespaces:
+      - gatekeeper-system
+      - kube-system
+
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredSecurityContext
+metadata:
+  name: required-security-context
+spec:
+  match:
+    excludedNamespaces:
+      - gatekeeper-system
+      - kube-system
+
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredLabels
+metadata:
+  name: required-labels
+spec:
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+    excludedNamespaces:
+      - gatekeeper-system
+      - kube-system
+  parameters:
+    labels: ["app", "version"]

@@ -1,0 +1,103 @@
+---
+# Trivy Operator Config
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trivy-operator-config
+  namespace: trivy-system
+data:
+  # Scan jobs configuration
+  scanJob.annotations: "app=dx03"
+  scanJob.labels: "security=scanning"
+  scanJob.ttlSecondsAfterFinished: "3600"
+  
+  # Reports configuration
+  reports.format: "json"
+  reports.retention: "24h"
+  
+  # Vulnerability scanning config
+  vulnerabilityScans.autoScan: "true"
+  vulnerabilityScans.scanOnlyCurrentRevisions: "true"
+  vulnerabilityScans.imagePullSecrets: ""
+  
+  # RBAC assessment configuration
+  rbacAssessments.autoScan: "true"
+  
+  # Config audit configuration
+  configAudits.autoScan: "true"
+  configAudits.scanOnlyCurrentRevisions: "false"
+  
+  # Infra assessment configuration
+  infraAssessments.autoScan: "true"
+  
+  # Skip scanning for certain namespaces
+  skipNamespaces: "kube-system,kube-public,kube-node-lease,gatekeeper-system,trivy-system"
+  
+  # Severity levels to report
+  reportSeverities: "CRITICAL,HIGH,MEDIUM"
+  
+  # Include fixed vulnerabilities
+  reportIncludeFixed: "false"
+
+---
+# RBAC for Trivy Operator
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: trivy-operator
+  namespace: trivy-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: trivy-operator
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "secrets", "configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "daemonsets", "statefulsets", "jobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["aquasecurity.github.io"]
+    resources: ["vulnerabilityreports", "clustervulnerabilityreports"]
+    verbs: ["create", "get", "list", "watch", "update", "patch"]
+  - apiGroups: ["aquasecurity.github.io"]
+    resources: ["configauditreports", "clusterconfigauditreports"]
+    verbs: ["create", "get", "list", "watch", "update", "patch"]
+  - apiGroups: ["aquasecurity.github.io"]
+    resources: ["rbacassessmentreports", "clusterrbacassessmentreports"]
+    verbs: ["create", "get", "list", "watch", "update", "patch"]
+  - apiGroups: ["aquasecurity.github.io"]
+    resources: ["infraassessmentreports", "clusterinfraassessmentreports"]
+    verbs: ["create", "get", "list", "watch", "update", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: trivy-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: trivy-operator
+subjects:
+  - kind: ServiceAccount
+    name: trivy-operator
+    namespace: trivy-system
+
+---
+# Namespace for Trivy
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: trivy-system
+  labels:
+    app: trivy-operator
+    security: scanning

@@ -1,0 +1,185 @@
+---
+# Require resource requests and limits
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredresources
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredResources
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            requiredResources:
+              type: array
+              items:
+                type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredresources
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container.resources.requests
+          msg := sprintf("Container '%v' must have resource requests defined", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container.resources.limits
+          msg := sprintf("Container '%v' must have resource limits defined", [container.name])
+        }
+
+---
+# Require image pull policy
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredimageagepolicy
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredImagePolicy
+      validation:
+        openAPIV3Schema:
+          type: object
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredimageagepolicy
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          container.imagePullPolicy != "Always"
+          msg := sprintf("Image pull policy must be 'Always' for container '%v', found: %v", [container.name, container.imagePullPolicy])
+        }
+
+---
+# Disallow privileged containers
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8snoprivileged
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sNoPrivileged
+      validation:
+        openAPIV3Schema:
+          type: object
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8snoprivileged
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          container.securityContext.privileged == true
+          msg := sprintf("Privileged containers not allowed in '%v'", [container.name])
+        }
+
+---
+# Block latest tag
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8sblocklatestimage
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sBlockLatestImage
+      validation:
+        openAPIV3Schema:
+          type: object
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8sblocklatestimage
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          endswith(container.image, ":latest")
+          msg := sprintf("Image '%v' must not use 'latest' tag, use specific version", [container.image])
+        }
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not contains(container.image, ":")
+          msg := sprintf("Image '%v' must have explicit version tag", [container.image])
+        }
+
+---
+# Require security context
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredsecuritycontext
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredSecurityContext
+      validation:
+        openAPIV3Schema:
+          type: object
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredsecuritycontext
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container.securityContext
+          msg := sprintf("Container '%v' must have securityContext defined", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          container.securityContext.runAsNonRoot != true
+          msg := sprintf("Container '%v' must run as non-root (runAsNonRoot: true)", [container.name])
+        }
+
+---
+# Require namespace labels
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredlabels
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredLabels
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            labels:
+              type: array
+              items:
+                type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredlabels
+
+        violation[{"msg": msg}] {
+          labels := input.review.object.metadata.labels
+          not labels
+          msg := "Pods must have labels defined"
+        }
+
+        violation[{"msg": msg}] {
+          required_labels := ["app", "version"]
+          provided_labels := object.keys(input.review.object.metadata.labels)
+          missing := required_labels[_]
+          not contains(provided_labels, missing)
+          msg := sprintf("Required label '%v' not found", [missing])
+        }

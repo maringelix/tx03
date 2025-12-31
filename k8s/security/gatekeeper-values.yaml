@@ -1,0 +1,65 @@
+# OPA Gatekeeper Helm Values
+# Policy-as-Code Admission Controller for Kubernetes
+
+enableExternalData: false
+enableGeneratorResourceExpansion: false
+logLevel: INFO
+auditInterval: 60
+constraintViolationsLimit: 20
+replicas: 2
+
+image:
+  repository: openpolicyagent/gatekeeper
+  tag: v3.14.0
+  pullPolicy: IfNotPresent
+
+audit:
+  replicas: 1
+  logLevel: INFO
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+audit:
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# Pod Security Standards
+podSecurityStandards:
+  enforced:
+    - restricted
+
+# Network Policy
+networkPolicy:
+  enabled: true
+
+# RBAC
+rbac:
+  create: true
+
+# Service Account
+serviceAccount:
+  create: true
+  name: gatekeeper-admin
+
+# Node Affinity
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        preference:
+          matchExpressions:
+            - key: kubernetes.io/os
+              operator: In
+              values:
+                - linux
