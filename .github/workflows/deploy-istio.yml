@@ -157,21 +157,6 @@ jobs:
           
           echo "✅ Addons installed"
 
-      - name: 🌐 Apply Istio Gateway and Telemetry
-        if: inputs.action == 'install' || inputs.action == 'upgrade'
-        run: |
-          echo "🌐 Applying Gateway and Telemetry configurations first..."
-          
-          if [ -f "k8s/istio/gateway.yaml" ]; then
-            kubectl apply -f k8s/istio/gateway.yaml
-            echo "✅ Gateway configuration applied"
-          fi
-          
-          if [ -f "k8s/istio/telemetry.yaml" ]; then
-            kubectl apply -f k8s/istio/telemetry.yaml
-            echo "✅ Telemetry configuration applied"
-          fi
-
       - name: 🔄 Restart Pods for Sidecar Injection
         if: inputs.action == 'install' || inputs.action == 'upgrade'
         run: |
@@ -185,16 +170,18 @@ jobs:
           kubectl rollout status deployment/dx03-frontend -n dx03-dev --timeout=300s
           
           echo "✅ Pods restarted with sidecars"
-
-      - name: 🔐 Apply Security Policies
+          
+      - name: ⚠️ Manual Configuration Required
         if: inputs.action == 'install' || inputs.action == 'upgrade'
         run: |
-          echo "🔐 Applying security policies after pods are ready..."
-          
-          if [ -f "k8s/istio/security.yaml" ]; then
-            kubectl apply -f k8s/istio/security.yaml
-            echo "✅ Security policies applied"
-          fi
+          echo "⚠️ IMPORTANT: Apply Istio configurations manually after verifying pods are healthy"
+          echo ""
+          echo "Run these commands to apply configurations:"
+          echo "  kubectl apply -f k8s/istio/gateway.yaml"
+          echo "  kubectl apply -f k8s/istio/telemetry.yaml"  
+          echo "  kubectl apply -f k8s/istio/security.yaml"
+          echo ""
+          echo "✅ Istio base installation complete!"
 
       - name: 📊 Display Istio Status
         if: inputs.action == 'install' || inputs.action == 'upgrade'
