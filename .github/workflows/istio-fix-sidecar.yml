@@ -1,0 +1,214 @@
+name: Fix Istio Sidecar Injection
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'diagnose'
+        type: choice
+        options:
+          - diagnose
+          - fix
+          - force-recreate
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  fix-sidecar-injection:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/433229461228/locations/global/workloadIdentityPools/github-pool/providers/github'
+          service_account: 'github-actions@project-28e61e96-b6ac-4249-a21f.iam.gserviceaccount.com'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: 'gke-gcloud-auth-plugin'
+
+      - name: Configure kubectl
+        run: |
+          gcloud container clusters get-credentials tx03-gke-cluster \
+            --region us-central1 \
+            --project project-28e61e96-b6ac-4249-a21f
+
+      - name: 🔍 Diagnose Sidecar Injection
+        id: diagnose
+        run: |
+          echo "======================================"
+          echo "🔍 DIAGNÓSTICO DE SIDECAR INJECTION"
+          echo "======================================"
+          echo ""
+          
+          echo "1️⃣ Verificando Mutating Webhooks..."
+          echo "-------------------------------------"
+          kubectl get mutatingwebhookconfiguration | grep -i istio || echo "⚠️  Nenhum webhook do Istio encontrado"
+          echo ""
+          
+          echo "2️⃣ Verificando Namespace Label..."
+          echo "-------------------------------------"
+          kubectl get namespace dx03-dev --show-labels
+          LABEL=$(kubectl get namespace dx03-dev -o jsonpath='{.metadata.labels.istio-injection}')
+          if [ "$LABEL" == "enabled" ]; then
+            echo "✅ Namespace tem label istio-injection=enabled"
+          else
+            echo "❌ Namespace NÃO tem label istio-injection"
+          fi
+          echo ""
+          
+          echo "3️⃣ Verificando Webhook do Istio..."
+          echo "-------------------------------------"
+          kubectl get mutatingwebhookconfiguration istio-sidecar-injector -o yaml | grep -A5 "namespaceSelector" || echo "⚠️  Webhook istio-sidecar-injector não encontrado"
+          echo ""
+          
+          echo "4️⃣ Verificando Pods Atuais..."
+          echo "-------------------------------------"
+          kubectl get pods -n dx03-dev -o wide
+          echo ""
+          
+          echo "5️⃣ Verificando Containers nos Pods..."
+          echo "-------------------------------------"
+          kubectl get pods -n dx03-dev -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].name}{"\n"}{end}'
+          echo ""
+          
+          echo "6️⃣ Verificando Annotations dos Pods..."
+          echo "-------------------------------------"
+          for pod in $(kubectl get pods -n dx03-dev -o jsonpath='{.items[*].metadata.name}'); do
+            echo "Pod: $pod"
+            kubectl get pod $pod -n dx03-dev -o jsonpath='{.metadata.annotations}' | jq . || echo "No annotations"
+            echo ""
+          done
+          
+          echo "7️⃣ Verificando Istiod Logs (últimas 50 linhas)..."
+          echo "-------------------------------------"
+          kubectl logs -n istio-system deployment/istiod --tail=50 | grep -i "inject\|webhook\|dx03-dev" || echo "Nenhum log relevante encontrado"
+          echo ""
+
+      - name: 🔧 Fix - Verificar e Reinstalar Webhook
+        if: inputs.action == 'fix'
+        run: |
+          echo "======================================"
+          echo "🔧 CORRIGINDO WEBHOOK CONFIGURATION"
+          echo "======================================"
+          echo ""
+          
+          # Verificar se webhook existe
+          if ! kubectl get mutatingwebhookconfiguration istio-sidecar-injector &>/dev/null; then
+            echo "❌ Webhook istio-sidecar-injector não encontrado!"
+            echo "🔄 Reinstalando webhook..."
+            
+            # Tentar aplicar novamente a configuração do Istio
+            istioctl install --set profile=default -y
+            
+            echo "✅ Webhook reinstalado"
+          else
+            echo "✅ Webhook existe"
+          fi
+          
+          # Verificar e corrigir namespace label
+          echo ""
+          echo "🔧 Verificando namespace label..."
+          kubectl label namespace dx03-dev istio-injection=enabled --overwrite
+          echo "✅ Namespace label atualizado"
+          
+          # Restart istiod para garantir que está funcionando
+          echo ""
+          echo "🔄 Reiniciando istiod..."
+          kubectl rollout restart deployment/istiod -n istio-system
+          kubectl rollout status deployment/istiod -n istio-system --timeout=3m
+          echo "✅ Istiod reiniciado"
+          
+          echo ""
+          echo "⏳ Aguardando webhook estabilizar (30s)..."
+          sleep 30
+
+      - name: 🚀 Force Recreate Pods
+        if: inputs.action == 'fix' || inputs.action == 'force-recreate'
+        run: |
+          echo "======================================"
+          echo "🚀 FORÇANDO RECRIAÇÃO DOS PODS"
+          echo "======================================"
+          echo ""
+          
+          echo "🗑️  Deletando pods existentes..."
+          kubectl delete pod --all -n dx03-dev
+          
+          echo ""
+          echo "⏳ Aguardando novos pods serem criados (60s)..."
+          sleep 60
+          
+          echo ""
+          echo "📊 Status dos novos pods:"
+          kubectl get pods -n dx03-dev -o wide
+          
+          echo ""
+          echo "🔍 Verificando containers:"
+          kubectl get pods -n dx03-dev -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].name}{"\n"}{end}'
+
+      - name: ✅ Validate Sidecar Injection
+        if: inputs.action == 'fix' || inputs.action == 'force-recreate'
+        run: |
+          echo "======================================"
+          echo "✅ VALIDAÇÃO FINAL"
+          echo "======================================"
+          echo ""
+          
+          echo "Aguardando todos os pods ficarem ready..."
+          kubectl wait --for=condition=ready pod --all -n dx03-dev --timeout=5m || true
+          
+          echo ""
+          echo "📊 Status Final dos Pods:"
+          kubectl get pods -n dx03-dev
+          
+          echo ""
+          echo "🔍 Containers em cada pod:"
+          kubectl get pods -n dx03-dev -o jsonpath='{range .items[*]}{.metadata.name}{": "}{.status.containerStatuses[*].name}{"\n"}{end}'
+          
+          echo ""
+          echo "🎯 Verificando sidecars:"
+          TOTAL_PODS=$(kubectl get pods -n dx03-dev -o json | jq '.items | length')
+          PODS_WITH_SIDECAR=$(kubectl get pods -n dx03-dev -o json | jq '[.items[] | select(.spec.containers | length > 1)] | length')
+          
+          echo "Total de pods: $TOTAL_PODS"
+          echo "Pods com sidecar: $PODS_WITH_SIDECAR"
+          
+          if [ "$TOTAL_PODS" -eq "$PODS_WITH_SIDECAR" ]; then
+            echo "✅ SUCESSO! Todos os pods têm sidecar injetado!"
+          else
+            echo "❌ FALHA! Alguns pods não têm sidecar"
+            echo ""
+            echo "Pods SEM sidecar:"
+            kubectl get pods -n dx03-dev -o json | jq -r '.items[] | select(.spec.containers | length == 1) | .metadata.name'
+            exit 1
+          fi
+
+      - name: 📝 Summary
+        if: always()
+        run: |
+          echo ""
+          echo "======================================"
+          echo "📝 RESUMO"
+          echo "======================================"
+          echo "Action: ${{ inputs.action }}"
+          echo "Cluster: tx03-gke-cluster"
+          echo "Namespace: dx03-dev"
+          echo ""
+          
+          if [ "${{ inputs.action }}" == "diagnose" ]; then
+            echo "✅ Diagnóstico completo!"
+            echo "👉 Analise os logs acima para identificar o problema"
+            echo "👉 Execute novamente com action='fix' para corrigir"
+          else
+            echo "✅ Fix aplicado!"
+            echo "👉 Verifique a seção 'Validate Sidecar Injection' acima"
+          fi
