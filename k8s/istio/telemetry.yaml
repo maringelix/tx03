@@ -13,30 +13,6 @@ spec:
   accessLogging:
   - providers:
     - name: envoy
-    disabled: false
----
-# ============================================================================
-# Custom Metrics Configuration
-# ============================================================================
-apiVersion: telemetry.istio.io/v1alpha1
-kind: Telemetry
-metadata:
-  name: custom-metrics
-  namespace: dx03-dev
-spec:
-  metrics:
-  - providers:
-    - name: prometheus
-    dimensions:
-      request_protocol: request.protocol | "unknown"
-      response_code: response.code | 0
-      connection_security_policy: conditional((context.reporter.kind | "inbound") == "outbound", "unknown", conditional(connection.mtls | false, "mutual_tls", "none"))
-    overrides:
-    - match:
-        metric: REQUEST_COUNT
-      tagOverrides:
-        response_code:
-          value: response.code | 0
 ---
 # ============================================================================
 # Distributed Tracing Configuration
