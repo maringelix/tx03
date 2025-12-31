@@ -1,0 +1,168 @@
+name: "Apply Istio Configurations"
+
+on:
+  workflow_dispatch:
+    inputs:
+      restart_pods:
+        description: 'Restart pods to inject sidecars'
+        required: true
+        default: 'true'
+        type: boolean
+      apply_configs:
+        description: 'Apply Istio configurations (gateway, telemetry, security)'
+        required: true
+        default: 'true'
+        type: boolean
+
+env:
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GCP_REGION: us-central1
+  CLUSTER_NAME: tx03-gke-cluster
+
+jobs:
+  apply-istio-configs:
+    name: "Configure Istio Service Mesh"
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔐 Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: ☁️ Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: 🔧 Configure kubectl
+        run: |
+          gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} \
+            --region ${{ env.GCP_REGION }} \
+            --project ${{ env.GCP_PROJECT_ID }}
+
+      - name: 🔄 Restart Pods for Sidecar Injection
+        if: inputs.restart_pods == true
+        run: |
+          echo "🔄 Restarting dx03 pods to inject Istio sidecars..."
+          
+          kubectl rollout restart deployment/dx03-backend -n dx03-dev
+          kubectl rollout restart deployment/dx03-frontend -n dx03-dev
+          
+          echo "⏳ Waiting for rollout to complete (10 min timeout)..."
+          kubectl rollout status deployment/dx03-backend -n dx03-dev --timeout=600s || true
+          kubectl rollout status deployment/dx03-frontend -n dx03-dev --timeout=600s || true
+          
+          echo ""
+          echo "📊 Current pod status:"
+          kubectl get pods -n dx03-dev
+          
+          echo ""
+          echo "✅ Pod restart initiated"
+
+      - name: 🌐 Apply Istio Configurations
+        if: inputs.apply_configs == true
+        run: |
+          echo "🌐 Applying Istio configurations..."
+          
+          if [ -f "k8s/istio/gateway.yaml" ]; then
+            kubectl apply -f k8s/istio/gateway.yaml
+            echo "✅ Gateway configuration applied"
+          fi
+          
+          if [ -f "k8s/istio/telemetry.yaml" ]; then
+            kubectl apply -f k8s/istio/telemetry.yaml
+            echo "✅ Telemetry configuration applied"
+          fi
+          
+          if [ -f "k8s/istio/security.yaml" ]; then
+            kubectl apply -f k8s/istio/security.yaml
+            echo "✅ Security policies applied (PERMISSIVE mTLS)"
+          fi
+          
+          echo ""
+          echo "✅ All Istio configurations applied!"
+
+      - name: ✅ Validate Installation
+        run: |
+          echo "======================================================================"
+          echo "🎯 Istio Service Mesh Validation"
+          echo "======================================================================"
+          echo ""
+          
+          echo "=== Istio System Pods ==="
+          kubectl get pods -n istio-system
+          echo ""
+          
+          echo "=== Application Pods (should show 2/2 containers after sidecar injection) ==="
+          kubectl get pods -n dx03-dev
+          echo ""
+          
+          echo "=== Istio Gateway ==="
+          kubectl get gateway -n dx03-dev
+          echo ""
+          
+          echo "=== Istio VirtualService ==="
+          kubectl get virtualservice -n dx03-dev
+          echo ""
+          
+          echo "=== Istio DestinationRules ==="
+          kubectl get destinationrule -n dx03-dev
+          echo ""
+          
+          echo "======================================================================"
+          echo "✅ Istio Configuration Complete!"
+          echo "======================================================================"
+          echo ""
+          echo "📚 Access Kiali dashboard:"
+          echo "   kubectl port-forward -n istio-system svc/kiali 20001:20001"
+          echo "   http://localhost:20001"
+          echo ""
+          echo "📊 Access Jaeger tracing:"
+          echo "   kubectl port-forward -n istio-system svc/jaeger 16686:16686"
+          echo "   http://localhost:16686"
+
+      - name: 📤 Send Slack notification on success
+        if: success()
+        uses: slackapi/slack-github-action@v1.24.0
+        continue-on-error: true
+        with:
+          payload: |
+            {
+              "text": "✅ Istio Configurations Applied Successfully",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "✅ *Istio Service Mesh Configured*\n\n*Restart Pods:* ${{ inputs.restart_pods }}\n*Apply Configs:* ${{ inputs.apply_configs }}\n\n*Next:* Access Kiali dashboard to view service mesh\n`kubectl port-forward -n istio-system svc/kiali 20001:20001`"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: 📤 Send Slack notification on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.24.0
+        continue-on-error: true
+        with:
+          payload: |
+            {
+              "text": "❌ Istio Configuration Failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "❌ *Istio Configuration Failed*\n\nCheck workflow logs for details."
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
