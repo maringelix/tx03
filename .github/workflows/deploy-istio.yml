@@ -1,0 +1,273 @@
+name: Deploy Istio Service Mesh
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'install'
+        type: choice
+        options:
+          - install
+          - upgrade
+          - uninstall
+      profile:
+        description: 'Istio configuration profile'
+        required: true
+        default: 'default'
+        type: choice
+        options:
+          - default
+          - demo
+          - minimal
+          - ambient
+      enable_addons:
+        description: 'Install Istio addons (Kiali, Jaeger, Prometheus, Grafana)'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  GCP_REGION: us-central1
+  CLUSTER_NAME: tx03-gke-cluster
+  ISTIO_VERSION: 1.20.1
+  ISTIO_NAMESPACE: istio-system
+
+jobs:
+  deploy-istio:
+    name: ${{ inputs.action }} Istio Service Mesh
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔐 Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: ☁️ Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: 'gke-gcloud-auth-plugin'
+
+      - name: 🔧 Configure kubectl
+        run: |
+          gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} \
+            --region ${{ env.GCP_REGION }} \
+            --project ${{ secrets.GCP_PROJECT_ID }}
+          
+          echo "✅ kubectl configured"
+          kubectl cluster-info
+
+      - name: 📦 Download and Install Istio CLI (istioctl)
+        if: inputs.action != 'uninstall'
+        run: |
+          echo "📥 Downloading Istio ${{ env.ISTIO_VERSION }}..."
+          curl -L https://istio.io/downloadIstio | ISTIO_VERSION=${{ env.ISTIO_VERSION }} sh -
+          
+          cd istio-${{ env.ISTIO_VERSION }}
+          sudo mv bin/istioctl /usr/local/bin/
+          
+          echo "✅ Istio CLI installed"
+          istioctl version --remote=false
+
+      - name: 🚀 Install Istio
+        if: inputs.action == 'install'
+        run: |
+          echo "🚀 Installing Istio with profile: ${{ inputs.profile }}"
+          
+          # Pre-check
+          istioctl x precheck
+          
+          # Install Istio
+          istioctl install \
+            --set profile=${{ inputs.profile }} \
+            --set meshConfig.accessLogFile=/dev/stdout \
+            --set meshConfig.enableTracing=true \
+            --set meshConfig.defaultConfig.tracing.zipkin.address=jaeger-collector.istio-system.svc:9411 \
+            --skip-confirmation
+          
+          echo "✅ Istio installed successfully"
+
+      - name: ⬆️ Upgrade Istio
+        if: inputs.action == 'upgrade'
+        run: |
+          echo "⬆️ Upgrading Istio..."
+          
+          istioctl upgrade \
+            --set profile=${{ inputs.profile }} \
+            --skip-confirmation
+          
+          echo "✅ Istio upgraded successfully"
+
+      - name: 🗑️ Uninstall Istio
+        if: inputs.action == 'uninstall'
+        continue-on-error: true
+        run: |
+          echo "🗑️ Uninstalling Istio..."
+          
+          # Remove Istio installation
+          istioctl uninstall --purge --skip-confirmation || true
+          
+          # Delete namespace
+          kubectl delete namespace ${{ env.ISTIO_NAMESPACE }} --ignore-not-found=true
+          
+          echo "✅ Istio uninstalled"
+
+      - name: 🏷️ Label namespace for sidecar injection
+        if: inputs.action == 'install' || inputs.action == 'upgrade'
+        run: |
+          echo "🏷️ Enabling automatic sidecar injection for dx03-dev namespace..."
+          
+          kubectl label namespace dx03-dev istio-injection=enabled --overwrite
+          
+          echo "✅ Namespace labeled for sidecar injection"
+          kubectl get namespace -L istio-injection
+
+      - name: 📊 Install Istio Addons
+        if: (inputs.action == 'install' || inputs.action == 'upgrade') && inputs.enable_addons
+        run: |
+          echo "📊 Installing Istio addons (Kiali, Jaeger, Prometheus, Grafana)..."
+          
+          cd istio-${{ env.ISTIO_VERSION }}
+          
+          # Install Prometheus (if not already installed)
+          kubectl apply -f samples/addons/prometheus.yaml || true
+          
+          # Install Grafana
+          kubectl apply -f samples/addons/grafana.yaml || true
+          
+          # Install Jaeger
+          kubectl apply -f samples/addons/jaeger.yaml || true
+          
+          # Install Kiali
+          kubectl apply -f samples/addons/kiali.yaml || true
+          
+          echo "⏳ Waiting for addons to be ready..."
+          kubectl rollout status deployment/kiali -n istio-system --timeout=300s || true
+          
+          echo "✅ Addons installed"
+
+      - name: 🌐 Apply Istio Configuration
+        if: inputs.action == 'install' || inputs.action == 'upgrade'
+        run: |
+          echo "🌐 Applying Istio configurations..."
+          
+          if [ -d "k8s/istio" ]; then
+            kubectl apply -f k8s/istio/
+            echo "✅ Istio configurations applied"
+          else
+            echo "⚠️ No Istio configurations found in k8s/istio/"
+          fi
+
+      - name: 🔄 Restart Pods for Sidecar Injection
+        if: inputs.action == 'install' || inputs.action == 'upgrade'
+        run: |
+          echo "🔄 Restarting dx03 pods to inject sidecars..."
+          
+          kubectl rollout restart deployment/dx03-backend -n dx03-dev
+          kubectl rollout restart deployment/dx03-frontend -n dx03-dev
+          
+          echo "⏳ Waiting for rollout to complete..."
+          kubectl rollout status deployment/dx03-backend -n dx03-dev --timeout=300s
+          kubectl rollout status deployment/dx03-frontend -n dx03-dev --timeout=300s
+          
+          echo "✅ Pods restarted with sidecars"
+
+      - name: 📊 Display Istio Status
+        if: inputs.action == 'install' || inputs.action == 'upgrade'
+        run: |
+          echo "============================================="
+          echo "🎯 Istio Service Mesh Status"
+          echo "============================================="
+          echo ""
+          
+          echo "=== Istio Version ==="
+          istioctl version
+          echo ""
+          
+          echo "=== Istio Components ==="
+          kubectl get pods -n istio-system
+          echo ""
+          
+          echo "=== Sidecar Injection Status ==="
+          kubectl get namespace -L istio-injection
+          echo ""
+          
+          echo "=== Application Pods (with sidecars) ==="
+          kubectl get pods -n dx03-dev -o wide
+          echo ""
+          
+          echo "=== Istio Proxy Status ==="
+          istioctl proxy-status
+          echo ""
+          
+          echo "============================================="
+          echo "✅ Istio Service Mesh Ready!"
+          echo "============================================="
+          echo ""
+          
+          echo "📚 Next steps:"
+          echo "1. Access Kiali dashboard:"
+          echo "   kubectl port-forward -n istio-system svc/kiali 20001:20001"
+          echo "   http://localhost:20001"
+          echo ""
+          echo "2. Access Jaeger tracing:"
+          echo "   kubectl port-forward -n istio-system svc/jaeger 16686:16686"
+          echo "   http://localhost:16686"
+          echo ""
+          echo "3. View service mesh topology in Kiali"
+          echo "4. Monitor traffic metrics and traces"
+
+      - name: 📤 Send Slack notification on success
+        if: success() && (inputs.action == 'install' || inputs.action == 'upgrade')
+        uses: slackapi/slack-github-action@v1.24.0
+        continue-on-error: true
+        with:
+          payload: |
+            {
+              "text": "✅ Istio Service Mesh ${{ inputs.action }} - Success",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "✅ *Istio Service Mesh ${{ inputs.action }} Successful*\n\n*Profile:* ${{ inputs.profile }}\n*Version:* ${{ env.ISTIO_VERSION }}\n*Cluster:* ${{ env.CLUSTER_NAME }}\n\n*Features Enabled:*\n🔐 mTLS automatic encryption\n📊 Traffic telemetry\n🔍 Distributed tracing (Jaeger)\n📈 Service metrics (Prometheus)\n🗺️ Service mesh visualization (Kiali)\n\n*Next Steps:*\n• Access Kiali: `kubectl port-forward -n istio-system svc/kiali 20001:20001`\n• Access Jaeger: `kubectl port-forward -n istio-system svc/jaeger 16686:16686`"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: 📤 Send Slack notification on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.24.0
+        continue-on-error: true
+        with:
+          payload: |
+            {
+              "text": "❌ Istio Service Mesh ${{ inputs.action }} - Failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "❌ *Istio Service Mesh ${{ inputs.action }} Failed*\n\nCheck the GitHub Actions logs for details."
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

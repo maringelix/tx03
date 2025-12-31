@@ -1,0 +1,131 @@
+# ============================================================================
+# Gateway - Istio Ingress Gateway Configuration
+# ============================================================================
+# Configures external access to the service mesh
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: dx03-gateway
+  namespace: dx03-dev
+spec:
+  selector:
+    istio: ingressgateway # Use Istio default gateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*"
+    tls:
+      httpsRedirect: true # Redirect HTTP to HTTPS
+  - port:
+      number: 443
+      name: https
+      protocol: HTTPS
+    hosts:
+    - "dx03.ddns.net"
+    - "*.dx03.ddns.net"
+    tls:
+      mode: SIMPLE
+      credentialName: dx03-tls-cert # Secret with TLS certificate
+---
+# ============================================================================
+# VirtualService - Traffic Routing Rules
+# ============================================================================
+# Routes traffic from Gateway to backend/frontend services
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: dx03-routes
+  namespace: dx03-dev
+spec:
+  hosts:
+  - "dx03.ddns.net"
+  - "*.dx03.ddns.net"
+  gateways:
+  - dx03-gateway
+  http:
+  # Backend API routes
+  - match:
+    - uri:
+        prefix: /api
+    - uri:
+        prefix: /health
+    route:
+    - destination:
+        host: dx03-backend.dx03-dev.svc.cluster.local
+        port:
+          number: 80
+    timeout: 30s
+    retries:
+      attempts: 3
+      perTryTimeout: 10s
+      retryOn: 5xx,reset,connect-failure,refused-stream
+  
+  # Frontend routes (default)
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: dx03-frontend.dx03-dev.svc.cluster.local
+        port:
+          number: 80
+    timeout: 15s
+---
+# ============================================================================
+# DestinationRule - Backend Traffic Policy
+# ============================================================================
+# Configures load balancing, circuit breaking, and connection pooling
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: dx03-backend
+  namespace: dx03-dev
+spec:
+  host: dx03-backend.dx03-dev.svc.cluster.local
+  trafficPolicy:
+    loadBalancer:
+      simple: LEAST_REQUEST # Intelligent load balancing
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 50
+        http2MaxRequests: 100
+        maxRequestsPerConnection: 1
+    outlierDetection:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+      minHealthPercent: 50
+  subsets:
+  - name: v1
+    labels:
+      version: v1
+---
+# ============================================================================
+# DestinationRule - Frontend Traffic Policy
+# ============================================================================
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: dx03-frontend
+  namespace: dx03-dev
+spec:
+  host: dx03-frontend.dx03-dev.svc.cluster.local
+  trafficPolicy:
+    loadBalancer:
+      simple: ROUND_ROBIN
+    connectionPool:
+      tcp:
+        maxConnections: 50
+      http:
+        http1MaxPendingRequests: 25
+        http2MaxRequests: 50
+  subsets:
+  - name: v1
+    labels:
+      version: v1

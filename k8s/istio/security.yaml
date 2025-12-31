@@ -1,0 +1,105 @@
+# ============================================================================
+# PeerAuthentication - Enable mTLS for all services in namespace
+# ============================================================================
+# Enforces mutual TLS between services for secure communication
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: dx03-dev
+spec:
+  mtls:
+    mode: STRICT # Enforce mTLS for all traffic
+---
+# ============================================================================
+# AuthorizationPolicy - Default Deny All
+# ============================================================================
+# Deny all traffic by default (whitelist approach)
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: deny-all
+  namespace: dx03-dev
+spec:
+  {} # Empty spec = deny all
+---
+# ============================================================================
+# AuthorizationPolicy - Allow Frontend to Backend
+# ============================================================================
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-frontend-to-backend
+  namespace: dx03-dev
+spec:
+  selector:
+    matchLabels:
+      app: dx03-backend
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals:
+        - "cluster.local/ns/dx03-dev/sa/default" # Frontend service account
+    to:
+    - operation:
+        methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+        paths: ["/api/*", "/health/*"]
+---
+# ============================================================================
+# AuthorizationPolicy - Allow Ingress Gateway to Services
+# ============================================================================
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-ingress-gateway
+  namespace: dx03-dev
+spec:
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        namespaces: ["istio-system"]
+        principals: ["cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"]
+    to:
+    - operation:
+        methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
+---
+# ============================================================================
+# AuthorizationPolicy - Allow Prometheus Scraping
+# ============================================================================
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-prometheus-scraping
+  namespace: dx03-dev
+spec:
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        namespaces: ["monitoring", "istio-system"]
+    to:
+    - operation:
+        methods: ["GET"]
+        paths: ["/stats/prometheus", "/metrics"]
+---
+# ============================================================================
+# RequestAuthentication - JWT Validation (Optional)
+# ============================================================================
+# Validates JWT tokens for API authentication
+# Uncomment and configure if using JWT authentication
+# apiVersion: security.istio.io/v1beta1
+# kind: RequestAuthentication
+# metadata:
+#   name: jwt-auth
+#   namespace: dx03-dev
+# spec:
+#   selector:
+#     matchLabels:
+#       app: dx03-backend
+#   jwtRules:
+#   - issuer: "https://your-auth-provider.com"
+#     jwksUri: "https://your-auth-provider.com/.well-known/jwks.json"
+#     audiences:
+#     - "dx03-api"
