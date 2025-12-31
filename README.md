@@ -91,14 +91,38 @@ Este repositório contém a infraestrutura do **tx03**, o terceiro projeto da s�
 - **Retenção:** 7 dias (Prometheus) + PVC persistente (Grafana 5Gi)
 - **📚 Documentação Completa:** [OBSERVABILITY.md](OBSERVABILITY.md) | [k8s/observability/README.md](k8s/observability/README.md)
 
+### 🔐 Security Stack - 100% OPERACIONAL
+- **Status:** 🟢 **PRODUÇÃO**
+- **Stack:** OPA Gatekeeper + Trivy Operator
+- **Componentes:**
+  - **Gatekeeper:** 2/2 pods running (audit + controller-manager)
+  - **Trivy Operator:** 1/1 pod running + scan jobs
+- **Políticas Ativas (6 policies):**
+  - Required Resources (CPU/Memory limits)
+  - Image Pull Policy (Always)
+  - No Privileged Containers
+  - Block :latest Image Tag
+  - Required Security Context (non-root)
+  - Required Labels (app, version)
+- **Scanning Ativo:**
+  - Vulnerability Reports (CVE detection)
+  - Config Audit Reports (security best practices)
+  - RBAC Assessment (permissions review)
+  - Infrastructure Assessment (cluster security)
+- **Retenção:** 24h (scan reports)
+- **Severidades:** CRITICAL, HIGH, MEDIUM
+- **Notificações:** Slack integrado
+- **📚 Documentação Completa:** [k8s/security/README.md](k8s/security/README.md) | [SECURITY.md](SECURITY.md)
+
 ### 📊 Estatísticas Finais
 ```
 Workflow Runs (Infra):     15 runs → 100% sucesso
 Workflow Runs (App):       47 deploys → 100% sucesso  
 Workflow Runs (Obs):       6 runs → 100% sucesso
-Tempo Total:               ~18 horas (incluindo SSL + observability)
-Issues Resolvidos:         35 problemas críticos
-Documentação Criada:       3500+ linhas
+Workflow Runs (Security):  3 runs → 100% sucesso
+Tempo Total:               ~20 horas (incluindo SSL + observability + security)
+Issues Resolvidos:         37 problemas críticos
+Documentação Criada:       4000+ linhas
 Uptime (App):              99.9%
 Response Time (API):       <50ms (P95)
 Response Time (DB):        3-5ms (latência)
@@ -124,7 +148,10 @@ Dashboards:                4 dashboards configurados
 ✅ **Métricas instrumentadas** no backend Node.js (prom-client)  
 ✅ **Cloud Monitoring integrado** para métricas de nodes GKE  
 ✅ **4 dashboards configurados** para monitoramento completo  
-✅ **Documentação completa** (3500+ linhas) publicada no GitHub  
+✅ **Security stack implementado** (OPA Gatekeeper + Trivy Operator)  
+✅ **6 políticas de segurança** ativas no cluster  
+✅ **Vulnerability scanning automático** de todas as imagens  
+✅ **Documentação completa** (4000+ linhas) publicada no GitHub  
 ✅ **CI/CD pipeline** totalmente automatizado  
 
 ### 🎯 Conquistas Técnicas
@@ -156,7 +183,10 @@ Dashboards:                4 dashboards configurados
 - [x] **Métricas Prometheus** instrumentadas no backend (prom-client)
 - [x] **4 dashboards** para monitoramento de aplicação e infraestrutura
 - [x] **Cloud Monitoring** integrado para métricas dos nodes GKE
-- [x] Documentação completa (3500+ linhas)
+- [x] **Security stack completo** (OPA Gatekeeper + Trivy Operator)
+- [x] **6 políticas de segurança** enforçadas via admission webhooks
+- [x] **Vulnerability scanning** automático de containers
+- [x] Documentação completa (4000+ linhas)
 - [x] 47 deploys incrementais bem-sucedidos
 
 ### 🎯 Próximos Passos
@@ -164,6 +194,9 @@ Dashboards:                4 dashboards configurados
 #### ✅ Concluídos Recentemente (31/12/2025)
 - [x] **HTTP → HTTPS Redirect**: Todo tráfego HTTP redireciona para HTTPS (301) ✅
 - [x] **Slack Alerts**: Alertmanager integrado com Slack para notificações em tempo real ✅
+- [x] **Security Stack**: OPA Gatekeeper + Trivy Operator implementados ✅
+- [x] **Policy Enforcement**: 6 políticas de segurança ativas (resources, images, privileges) ✅
+- [x] **Vulnerability Scanning**: Scan automático de todas as imagens em produção ✅
 
 #### Fase 8: Otimização & Produção (Alta Prioridade)
 - [ ] **Horizontal Pod Autoscaler (HPA)** - 20 min
@@ -201,7 +234,9 @@ Dashboards:                4 dashboards configurados
 > - [APPLICATION_DEPLOYMENT.md](APPLICATION_DEPLOYMENT.md) - Guia completo de deployment
 > - [LOAD_BALANCER_FIX.md](LOAD_BALANCER_FIX.md) - Resolução do Load Balancer (199 linhas)
 > - [TERRAFORM_PLAN_TROUBLESHOOTING.md](TERRAFORM_PLAN_TROUBLESHOOTING.md) - Troubleshooting Terraform
-> - **[k8s/observability/README.md](k8s/observability/README.md) - Stack de Observabilidade (Prometheus + Grafana + Alertmanager)**
+> - **[k8s/observability/README.md](k8s/observability/README.md)** - Stack de Observabilidade (Prometheus + Grafana + Alertmanager)
+> - **[SECURITY.md](SECURITY.md)** - Documentação completa da Security Stack
+> - **[k8s/security/README.md](k8s/security/README.md)** - Guia de referência das políticas de segurança
 
 ## 🔧 Pré-requisitos
 

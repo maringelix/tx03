@@ -1,0 +1,659 @@
+# Guia de Referência Rápida - TX03
+
+> Quick reference para comandos e recursos do projeto TX03/DX03
+
+**Última atualização:** 31 de Dezembro de 2025
+
+---
+
+## 📋 Índice
+
+- [Informações do Projeto](#informações-do-projeto)
+- [Acesso Rápido](#acesso-rápido)
+- [Comandos Terraform](#comandos-terraform)
+- [Comandos Kubernetes](#comandos-kubernetes)
+- [Observabilidade](#observabilidade)
+- [Segurança](#segurança)
+- [CI/CD](#cicd)
+- [Troubleshooting](#troubleshooting)
+- [Links Úteis](#links-úteis)
+
+---
+
+## 🎯 Informações do Projeto
+
+### Recursos GCP
+
+```bash
+PROJECT_ID="project-28e61e96-b6ac-4249-a21"
+PROJECT_NUMBER="<number>"
+REGION="us-central1"
+CLUSTER_NAME="tx03-gke-cluster"
+```
+
+### Aplicação
+
+```bash
+# URLs
+HTTP:  http://dx03.ddns.net
+HTTPS: https://dx03.ddns.net
+
+# IP Estático
+EXTERNAL_IP="34.36.62.164"
+
+# Namespaces
+APP_NAMESPACE="dx03-dev"
+MONITORING_NAMESPACE="monitoring"
+GATEKEEPER_NAMESPACE="gatekeeper-system"
+TRIVY_NAMESPACE="trivy-system"
+```
+
+### Repositórios
+
+```bash
+# GitHub
+INFRA_REPO="https://github.com/maringelix/tx03"
+APP_REPO="https://github.com/maringelix/dx03"
+
+# Artifact Registry
+REGISTRY="us-central1-docker.pkg.dev/${PROJECT_ID}/dx03"
+```
+
+---
+
+## 🚀 Acesso Rápido
+
+### Conectar ao Cluster
+
+```bash
+# 1. Autenticar
+gcloud auth login
+
+# 2. Configurar projeto
+gcloud config set project project-28e61e96-b6ac-4249-a21
+
+# 3. Conectar ao GKE
+gcloud container clusters get-credentials tx03-gke-cluster \
+  --region us-central1 \
+  --project project-28e61e96-b6ac-4249-a21
+
+# 4. Verificar
+kubectl config current-context
+kubectl get nodes
+```
+
+### Port-Forward para Serviços
+
+```bash
+# Grafana (http://localhost:3001)
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 3001:80
+
+# Prometheus (http://localhost:9091)
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9091:9090
+
+# Alertmanager (http://localhost:9093)
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093
+
+# Backend direto (http://localhost:3000)
+kubectl port-forward -n dx03-dev svc/dx03-backend 3000:3000
+```
+
+### Credenciais
+
+```bash
+# Grafana
+Username: admin
+Password: Admin123456
+
+# Cloud SQL
+Username: dx03user
+Password: (Secret no GitHub)
+Database: dx03db
+```
+
+---
+
+## 🏗️ Comandos Terraform
+
+### Workflow Básico
+
+```bash
+cd terraform/
+
+# Inicializar
+terraform init
+
+# Planejar mudanças
+terraform plan
+
+# Aplicar
+terraform apply
+
+# Destruir (CUIDADO!)
+terraform destroy
+```
+
+### Comandos Úteis
+
+```bash
+# Ver estado atual
+terraform show
+
+# Listar recursos
+terraform state list
+
+# Ver recurso específico
+terraform state show google_container_cluster.gke_cluster
+
+# Importar recurso existente
+terraform import google_container_cluster.gke_cluster projects/${PROJECT_ID}/locations/${REGION}/clusters/${CLUSTER_NAME}
+
+# Refresh state
+terraform refresh
+
+# Validar configuração
+terraform validate
+
+# Formatar código
+terraform fmt -recursive
+```
+
+### Módulos
+
+```bash
+# Aplicar apenas um módulo
+terraform apply -target=module.vpc
+
+# Destroy apenas um recurso
+terraform destroy -target=google_container_cluster.gke_cluster
+```
+
+---
+
+## ☸️ Comandos Kubernetes
+
+### Pods e Deployments
+
+```bash
+# Listar todos os recursos
+kubectl get all -n dx03-dev
+
+# Pods
+kubectl get pods -n dx03-dev
+kubectl get pods -n dx03-dev -o wide
+kubectl describe pod <pod-name> -n dx03-dev
+
+# Deployments
+kubectl get deployments -n dx03-dev
+kubectl describe deployment dx03-backend -n dx03-dev
+kubectl rollout status deployment/dx03-backend -n dx03-dev
+
+# Escalar deployment
+kubectl scale deployment dx03-backend --replicas=3 -n dx03-dev
+
+# Restart deployment
+kubectl rollout restart deployment/dx03-backend -n dx03-dev
+```
+
+### Logs
+
+```bash
+# Logs de um pod
+kubectl logs -f <pod-name> -n dx03-dev
+
+# Logs de deployment (todos os pods)
+kubectl logs -f deployment/dx03-backend -n dx03-dev
+
+# Logs anteriores (crashed pod)
+kubectl logs --previous <pod-name> -n dx03-dev
+
+# Logs com timestamp
+kubectl logs -f --timestamps <pod-name> -n dx03-dev
+
+# Últimas N linhas
+kubectl logs --tail=100 <pod-name> -n dx03-dev
+```
+
+### Services e Ingress
+
+```bash
+# Services
+kubectl get svc -n dx03-dev
+kubectl describe svc dx03-backend -n dx03-dev
+
+# Ingress
+kubectl get ingress -n dx03-dev
+kubectl describe ingress dx03-ingress -n dx03-dev
+
+# Endpoints
+kubectl get endpoints -n dx03-dev
+```
+
+### ConfigMaps e Secrets
+
+```bash
+# ConfigMaps
+kubectl get configmap -n dx03-dev
+kubectl describe configmap dx03-backend-config -n dx03-dev
+kubectl edit configmap dx03-backend-config -n dx03-dev
+
+# Secrets
+kubectl get secrets -n dx03-dev
+kubectl describe secret dx03-db-secret -n dx03-dev
+
+# Decode secret
+kubectl get secret dx03-db-secret -n dx03-dev -o jsonpath='{.data.password}' | base64 -d
+```
+
+### Debugging
+
+```bash
+# Executar shell no pod
+kubectl exec -it <pod-name> -n dx03-dev -- /bin/sh
+
+# Executar comando
+kubectl exec <pod-name> -n dx03-dev -- env | grep DATABASE
+
+# Copiar arquivos
+kubectl cp <pod-name>:/path/to/file ./local-file -n dx03-dev
+
+# Ver eventos
+kubectl get events -n dx03-dev --sort-by='.lastTimestamp'
+
+# Top (recursos)
+kubectl top pods -n dx03-dev
+kubectl top nodes
+```
+
+### Namespaces
+
+```bash
+# Listar namespaces
+kubectl get namespaces
+
+# Criar namespace
+kubectl create namespace staging
+
+# Deletar namespace
+kubectl delete namespace staging
+
+# Ver todos os recursos em um namespace
+kubectl api-resources --verbs=list --namespaced -o name | \
+  xargs -n 1 kubectl get --show-kind --ignore-not-found -n dx03-dev
+```
+
+---
+
+## 📊 Observabilidade
+
+### Prometheus
+
+```bash
+# Port-forward
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9091:9090
+
+# Ver configuração
+kubectl get prometheus -n monitoring
+kubectl describe prometheus kube-prometheus-stack-prometheus -n monitoring
+
+# ServiceMonitors
+kubectl get servicemonitors -n monitoring
+kubectl get servicemonitors -n dx03-dev
+
+# Alertas ativos
+kubectl get prometheusrules -n monitoring
+```
+
+### Queries Úteis (PromQL)
+
+```promql
+# Taxa de requests HTTP
+rate(http_requests_total[5m])
+
+# Latência P95
+histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+
+# Memory usage
+container_memory_usage_bytes{namespace="dx03-dev"}
+
+# CPU usage
+rate(container_cpu_usage_seconds_total{namespace="dx03-dev"}[5m])
+
+# Pods em estado não-running
+kube_pod_status_phase{namespace="dx03-dev",phase!="Running"}
+```
+
+### Grafana
+
+```bash
+# Port-forward
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 3001:80
+
+# Ver senha admin
+kubectl get secret kube-prometheus-stack-grafana -n monitoring \
+  -o jsonpath='{.data.admin-password}' | base64 -d
+
+# Dashboards configurados
+- DX03 Application Dashboard
+- GKE Nodes Dashboard
+- Kubernetes Cluster Monitoring
+- Prometheus Stats
+```
+
+### Alertmanager
+
+```bash
+# Port-forward
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093
+
+# Ver configuração
+kubectl get secret alertmanager-kube-prometheus-stack-alertmanager -n monitoring \
+  -o jsonpath='{.data.alertmanager\.yaml}' | base64 -d
+
+# Silenciar alertas (UI)
+# http://localhost:9093/#/silences
+```
+
+**📚 Documentação:** [OBSERVABILITY.md](OBSERVABILITY.md)
+
+---
+
+## 🔐 Segurança
+
+### OPA Gatekeeper
+
+```bash
+# Ver pods
+kubectl get pods -n gatekeeper-system
+
+# Constraint Templates
+kubectl get constrainttemplates
+
+# Constraints aplicados
+kubectl get constraints -A
+
+# Ver violações
+kubectl describe constraint required-resources
+
+# Logs
+kubectl logs -n gatekeeper-system -l app=gatekeeper-audit -f
+kubectl logs -n gatekeeper-system -l app=gatekeeper-controller-manager -f
+
+# Desabilitar constraint (temporário)
+kubectl patch constraint required-resources \
+  -p '{"spec":{"enforcementAction":"dryrun"}}' --type=merge
+```
+
+### Trivy Operator
+
+```bash
+# Ver pods
+kubectl get pods -n trivy-system
+
+# Vulnerability Reports
+kubectl get vulnerabilityreports -n dx03-dev
+kubectl describe vr <pod-name> -n dx03-dev
+
+# Config Audit Reports
+kubectl get configauditreports -n dx03-dev
+kubectl describe car deployment-dx03-backend -n dx03-dev
+
+# RBAC Assessment
+kubectl get rbacassessmentreports -n dx03-dev
+kubectl get clusterrbacassessmentreports
+
+# Infra Assessment
+kubectl get infraassessmentreports -n dx03-dev
+
+# Logs
+kubectl logs -n trivy-system -l app.kubernetes.io/name=trivy-operator -f
+
+# Ver scan jobs
+kubectl get jobs -n trivy-system
+kubectl get pods -n trivy-system | grep scan-
+```
+
+### Comandos Úteis
+
+```bash
+# Ver todas as políticas ativas
+kubectl get constraints -A -o wide
+
+# Vulnerabilidades CRITICAL
+kubectl get vr -n dx03-dev -o json | \
+  jq '.items[] | select(.report.summary.critical > 0)'
+
+# Exportar relatório de compliance
+kubectl get constraints -A -o yaml > compliance-report.yaml
+
+# Forçar scan manual
+kubectl annotate pod <pod-name> -n dx03-dev \
+  trivy-operator.aquasecurity.github.io/force-scan=$(date +%s)
+```
+
+**📚 Documentação:** [SECURITY.md](SECURITY.md) | [k8s/security/README.md](k8s/security/README.md)
+
+---
+
+## 🔄 CI/CD
+
+### GitHub Actions Workflows
+
+```bash
+# Listar workflows
+gh workflow list
+
+# Listar runs
+gh run list
+
+# Ver run específico
+gh run view <run-id>
+
+# Ver logs
+gh run view <run-id> --log
+
+# Watch run em tempo real
+gh run watch
+
+# Rerun failed jobs
+gh run rerun <run-id>
+```
+
+### Triggers Manuais
+
+```bash
+# Deploy infraestrutura
+gh workflow run deploy-infrastructure.yml
+
+# Deploy aplicação
+gh workflow run deploy-application.yml
+
+# Deploy observability
+gh workflow run deploy-observability.yml
+
+# Deploy security
+gh workflow run deploy-security.yml
+
+# Destroy (CUIDADO!)
+gh workflow run destroy-infrastructure.yml
+```
+
+### Ver Logs de Workflow
+
+```bash
+# Últimos 3 runs de cada workflow
+gh run list --workflow=deploy-application.yml --limit 3
+
+# Logs do último run
+gh run view --log
+
+# Logs de um job específico
+gh run view <run-id> --job <job-id> --log
+```
+
+---
+
+## 🔧 Troubleshooting
+
+### Pod não inicia
+
+```bash
+# Ver status e eventos
+kubectl describe pod <pod-name> -n dx03-dev
+
+# Ver logs
+kubectl logs <pod-name> -n dx03-dev
+
+# Ver logs anteriores (crashed)
+kubectl logs --previous <pod-name> -n dx03-dev
+
+# Verificar imagem
+kubectl get pod <pod-name> -n dx03-dev -o jsonpath='{.spec.containers[0].image}'
+```
+
+### Problemas de conectividade
+
+```bash
+# Testar DNS
+kubectl run -it --rm debug --image=busybox --restart=Never -- nslookup dx03-backend.dx03-dev.svc.cluster.local
+
+# Testar conectividade HTTP
+kubectl run -it --rm debug --image=curlimages/curl --restart=Never -- curl http://dx03-backend.dx03-dev.svc.cluster.local:3000/health
+
+# Ver endpoints do service
+kubectl get endpoints dx03-backend -n dx03-dev
+```
+
+### Database connection issues
+
+```bash
+# Verificar secret
+kubectl get secret dx03-db-secret -n dx03-dev -o yaml
+
+# Testar conexão (do pod)
+kubectl exec -it <backend-pod> -n dx03-dev -- \
+  psql -h <cloud-sql-ip> -U dx03user -d dx03db
+
+# Ver variáveis de ambiente do pod
+kubectl exec <backend-pod> -n dx03-dev -- env | grep DATABASE
+```
+
+### Ingress não responde
+
+```bash
+# Ver status do Ingress
+kubectl describe ingress dx03-ingress -n dx03-dev
+
+# Ver eventos de LB
+kubectl get events -n dx03-dev | grep ingress
+
+# Verificar backend services
+gcloud compute backend-services list
+
+# Ver health checks
+gcloud compute health-checks list
+
+# Testar diretamente o backend
+kubectl port-forward -n dx03-dev svc/dx03-backend 3000:3000
+curl http://localhost:3000/health
+```
+
+### Workflow failing
+
+```bash
+# Ver últimos runs
+gh run list --workflow=deploy-application.yml --limit 5
+
+# Ver logs detalhados
+gh run view <run-id> --log
+
+# Rerun com debug
+gh run rerun <run-id>
+
+# Verificar secrets
+gh secret list
+
+# Testar Workload Identity
+gcloud iam service-accounts list
+gcloud projects get-iam-policy ${PROJECT_ID}
+```
+
+---
+
+## 📚 Links Úteis
+
+### Documentação do Projeto
+
+- **README Principal:** [README.md](README.md)
+- **Deployment Guide:** [APPLICATION_DEPLOYMENT.md](APPLICATION_DEPLOYMENT.md)
+- **Load Balancer Fix:** [LOAD_BALANCER_FIX.md](LOAD_BALANCER_FIX.md)
+- **Observability:** [OBSERVABILITY.md](OBSERVABILITY.md)
+- **Security:** [SECURITY.md](SECURITY.md)
+- **Terraform Troubleshooting:** [TERRAFORM_PLAN_TROUBLESHOOTING.md](TERRAFORM_PLAN_TROUBLESHOOTING.md)
+
+### Stack Específico
+
+- **Observability Stack:** [k8s/observability/README.md](k8s/observability/README.md)
+- **Security Stack:** [k8s/security/README.md](k8s/security/README.md)
+
+### Repositórios
+
+- **Infraestrutura (tx03):** https://github.com/maringelix/tx03
+- **Aplicação (dx03):** https://github.com/maringelix/dx03
+
+### Aplicação em Produção
+
+- **HTTP:** http://dx03.ddns.net
+- **HTTPS:** https://dx03.ddns.net
+- **IP Estático:** 34.36.62.164
+
+### GCP Console
+
+- **Projeto:** https://console.cloud.google.com/home/dashboard?project=project-28e61e96-b6ac-4249-a21
+- **GKE Clusters:** https://console.cloud.google.com/kubernetes/list
+- **Cloud SQL:** https://console.cloud.google.com/sql/instances
+- **Load Balancing:** https://console.cloud.google.com/net-services/loadbalancing/list
+- **Artifact Registry:** https://console.cloud.google.com/artifacts
+- **Cloud Armor:** https://console.cloud.google.com/net-security/securitypolicies/list
+
+### Ferramentas Externas
+
+- **kubectl Cheat Sheet:** https://kubernetes.io/docs/reference/kubectl/cheatsheet/
+- **Terraform Docs:** https://registry.terraform.io/providers/hashicorp/google/latest/docs
+- **PromQL Guide:** https://prometheus.io/docs/prometheus/latest/querying/basics/
+- **Rego Playground:** https://play.openpolicyagent.org/
+
+---
+
+## 🎯 Status Resumido
+
+### ✅ Infraestrutura
+- GKE Autopilot: RUNNING
+- Cloud SQL PostgreSQL: CONNECTED
+- Load Balancer: ACTIVE (34.36.62.164)
+- Cloud Armor WAF: PROTECTING
+- SSL Certificate: ACTIVE (até 29/03/2026)
+
+### ✅ Aplicação
+- Frontend: 2/2 pods RUNNING
+- Backend: 2/2 pods RUNNING
+- Health Checks: PASSING
+- HTTPS: dx03.ddns.net ✅
+
+### ✅ Observabilidade
+- Prometheus: RUNNING
+- Grafana: ACCESSIBLE (port 3001)
+- Alertmanager: CONFIGURED
+- Dashboards: 4 ativos
+
+### ✅ Segurança
+- Gatekeeper: 2/2 pods RUNNING
+- Trivy Operator: 1/1 pod RUNNING
+- Políticas: 6 ativas
+- Scanning: AUTOMÁTICO
+
+---
+
+**Última atualização:** 31 de Dezembro de 2025  
+**Slack:** #tx03-support  
+**Equipe:** DevOps @ TX03
