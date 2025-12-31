@@ -90,43 +90,9 @@ jobs:
       if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
       run: |
         echo "🔐 Installing/Upgrading OPA Gatekeeper..."
-        
-        helm upgrade --install gatekeeper gatekeeper/gatekeeper \
-          --namespace ${{ env.GATEKEEPER_NAMESPACE }} \
-          --values k8s/security/gatekeeper-values.yaml \
-          --timeout=10m \
-          --atomic=false
-        
-        echo "✅ OPA Gatekeeper ${{ github.event.inputs.action }}ed"
-        echo "⏳ Waiting for Gatekeeper deployment..."
-        
-        kubectl wait --for=condition=ready pod \
-          -l control-plane=controller-manager \
-          -n ${{ env.GATEKEEPER_NAMESPACE }} \
-          --timeout=300s || echo "⚠️  Gatekeeper deployment ongoing"
-
-    - name: 📋 Deploy Gatekeeper Policies
-      if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
-      run: |
-        echo "📋 Deploying constraint templates and policies..."
-        
-        # Apply constraint templates
-        kubectl apply -f k8s/security/gatekeeper-policies.yaml
-        
-        # Apply constraints
-        kubectl apply -f k8s/security/gatekeeper-constraints.yaml
-        
-        echo "✅ Gatekeeper policies deployed"
-        
-        # List constraints
-        echo ""
-        echo "📊 Constraints deployed:"
-        kubectl get constraints
-        
-        # Show violations
-        echo ""
-        echo "⚠️  Checking for violations..."
-        kubectl get constraints -o json | jq -r '.items[] | "\(.kind): \(.metadata.name)"' || echo "No violations found"
+        echo "ℹ️  Note: Gatekeeper requires specific webhook configuration for GKE Autopilot"
+        echo "Skipping for now - use manual setup for advanced policy enforcement"
+        echo "✅ Gatekeeper installation skipped (use manual deployment)"
 
     - name: 🔍 Install Trivy Operator
       if: github.event.inputs.action == 'install' || github.event.inputs.action == 'upgrade'
@@ -184,14 +150,6 @@ jobs:
         echo "=========================================="
         echo ""
         
-        echo "=== OPA Gatekeeper ==="
-        kubectl get deployment -n ${{ env.GATEKEEPER_NAMESPACE }} -o wide || echo "No Gatekeeper deployment found"
-        
-        echo ""
-        echo "Constraints:"
-        kubectl get constraints || echo "No constraints deployed"
-        
-        echo ""
         echo "=== Trivy Operator ==="
         kubectl get deployment -n ${{ env.TRIVY_NAMESPACE }} -o wide || echo "No Trivy deployment found"
         
@@ -205,13 +163,10 @@ jobs:
         echo "=========================================="
         echo ""
         echo "📚 Next steps:"
-        echo "1. Monitor Gatekeeper violations:"
-        echo "   kubectl describe constraint required-resources"
-        echo ""
-        echo "2. Check Trivy scan results:"
+        echo "1. Monitor Trivy scan results:"
         echo "   kubectl get vulnerabilityreports -n dx03-dev"
         echo ""
-        echo "3. View detailed reports:"
+        echo "2. View detailed reports:"
         echo "   kubectl describe vr <report-name> -n dx03-dev"
 
     - name: 🗑️ Uninstall Security Stack
@@ -223,13 +178,10 @@ jobs:
         echo "Removing Trivy Operator..."
         helm uninstall trivy-operator -n ${{ env.TRIVY_NAMESPACE }} 2>/dev/null || echo "Trivy already removed"
         
-        echo "Removing OPA Gatekeeper..."
-        helm uninstall gatekeeper -n ${{ env.GATEKEEPER_NAMESPACE }} 2>/dev/null || echo "Gatekeeper already removed"
-        
         # Delete namespaces (optional)
         echo "Deleting namespaces..."
-        kubectl delete namespace ${{ env.GATEKEEPER_NAMESPACE }} --ignore-not-found=true
         kubectl delete namespace ${{ env.TRIVY_NAMESPACE }} --ignore-not-found=true
+        kubectl delete namespace ${{ env.GATEKEEPER_NAMESPACE }} --ignore-not-found=true
         
         echo "✅ Security stack uninstalled"
 
