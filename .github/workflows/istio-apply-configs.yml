@@ -13,6 +13,11 @@ on:
         required: true
         default: 'true'
         type: boolean
+      force_delete:
+        description: 'Force delete and recreate pods (instead of restart)'
+        required: true
+        default: 'false'
+        type: boolean
 
 env:
   GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
@@ -50,8 +55,24 @@ jobs:
             --region ${{ env.GCP_REGION }} \
             --project ${{ env.GCP_PROJECT_ID }}
 
+      - name: �️ Force Delete Pods (if requested)
+        if: inputs.force_delete == true
+        run: |
+          echo "🗑️ Deleting all pods to force sidecar injection..."
+          
+          kubectl delete pod --all -n dx03-dev
+          
+          echo "⏳ Waiting for new pods to be created (60s)..."
+          sleep 60
+          
+          echo "📊 New pods status:"
+          kubectl get pods -n dx03-dev
+          
+          echo ""
+          echo "✅ Pods deleted and recreated"
+
       - name: 🔄 Restart Pods for Sidecar Injection
-        if: inputs.restart_pods == true
+        if: inputs.restart_pods == true && inputs.force_delete == false
         run: |
           echo "🔄 Restarting dx03 pods to inject Istio sidecars..."
           
@@ -89,6 +110,41 @@ jobs:
           
           echo ""
           echo "✅ All Istio configurations applied!"
+
+      - name: 🔍 Diagnose Sidecar Injection
+        if: inputs.restart_pods == true || inputs.force_delete == true
+        run: |
+          echo "======================================================================"
+          echo "🔍 DIAGNÓSTICO DE SIDECAR INJECTION"
+          echo "======================================================================"
+          echo ""
+          
+          echo "1️⃣ Namespace Label:"
+          kubectl get namespace dx03-dev --show-labels | grep istio-injection
+          echo ""
+          
+          echo "2️⃣ Mutating Webhook:"
+          kubectl get mutatingwebhookconfiguration istio-sidecar-injector -o yaml | grep -A10 namespaceSelector || echo "⚠️ Webhook not found"
+          echo ""
+          
+          echo "3️⃣ Pods with Container Count:"
+          kubectl get pods -n dx03-dev -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].name}{"\n"}{end}'
+          echo ""
+          
+          echo "4️⃣ Checking Sidecar Injection:"
+          TOTAL_PODS=$(kubectl get pods -n dx03-dev -o json | jq '.items | length')
+          PODS_WITH_SIDECAR=$(kubectl get pods -n dx03-dev -o json | jq '[.items[] | select(.spec.containers | length > 1)] | length')
+          
+          echo "Total pods: $TOTAL_PODS"
+          echo "Pods with sidecar: $PODS_WITH_SIDECAR"
+          
+          if [ "$TOTAL_PODS" -eq "$PODS_WITH_SIDECAR" ] && [ "$TOTAL_PODS" -gt 0 ]; then
+            echo "✅ SUCCESS! All pods have sidecars injected!"
+          else
+            echo "❌ WARNING! Some pods may not have sidecars"
+            echo "This is expected if pods are still being created."
+          fi
+          echo ""
 
       - name: ✅ Validate Installation
         run: |
