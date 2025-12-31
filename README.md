@@ -3,6 +3,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Terraform](https://img.shields.io/badge/Terraform-1.9+-purple.svg)](https://www.terraform.io/)
 [![GCP](https://img.shields.io/badge/GCP-Cloud-blue.svg)](https://cloud.google.com/)
+[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=maringelix_tx03&metric=security_rating)](https://sonarcloud.io/dashboard?id=maringelix_tx03)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=maringelix_tx03&metric=alert_status)](https://sonarcloud.io/dashboard?id=maringelix_tx03)
 
 > Infraestrutura como Código (IaC) para aplicação fullstack no Google Cloud Platform usando Terraform, GKE, Cloud SQL, Cloud Armor e GitHub Actions.
 
@@ -91,7 +93,17 @@ Este repositório contém a infraestrutura do **tx03**, o terceiro projeto da s�
 - **Retenção:** 7 dias (Prometheus) + PVC persistente (Grafana 5Gi)
 - **📚 Documentação Completa:** [OBSERVABILITY.md](OBSERVABILITY.md) | [k8s/observability/README.md](k8s/observability/README.md)
 
-### 🔐 Security Stack - 100% OPERACIONAL
+### � Code Quality - SonarCloud
+- **Status:** 🟢 **MONITORADO**
+- **Plataforma:** SonarCloud
+- **Projetos Analisados:**
+  - **tx03** (Infraestrutura): 3.8k LoC | Security E | Reliability A | Maintainability A
+  - **dx03** (Aplicação): 1.5k LoC | Security C | Reliability A | Maintainability A
+- **Quality Gate:** Failed (4 projetos)
+- **Análise:** Automática via GitHub Actions
+- **Dashboard:** https://sonarcloud.io/organizations/maringelix/projects
+
+### �🔐 Security Stack - 100% OPERACIONAL
 - **Status:** 🟢 **PRODUÇÃO**
 - **Stack:** OPA Gatekeeper + Trivy Operator
 - **Componentes:**
@@ -123,6 +135,8 @@ Workflow Runs (Security):  3 runs → 100% sucesso
 Tempo Total:               ~20 horas (incluindo SSL + observability + security)
 Issues Resolvidos:         37 problemas críticos
 Documentação Criada:       4000+ linhas
+Code Quality:              SonarCloud integrado (tx03 + dx03)
+Linhas de Código:          5.3k (3.8k infra + 1.5k app)
 Uptime (App):              99.9%
 Response Time (API):       <50ms (P95)
 Response Time (DB):        3-5ms (latência)
@@ -151,6 +165,8 @@ Dashboards:                4 dashboards configurados
 ✅ **Security stack implementado** (OPA Gatekeeper + Trivy Operator)  
 ✅ **6 políticas de segurança** ativas no cluster  
 ✅ **Vulnerability scanning automático** de todas as imagens  
+✅ **SonarCloud integrado** para análise de código contínua  
+✅ **Code quality monitoring** em infraestrutura e aplicação  
 ✅ **Documentação completa** (4000+ linhas) publicada no GitHub  
 ✅ **CI/CD pipeline** totalmente automatizado  
 
@@ -186,6 +202,8 @@ Dashboards:                4 dashboards configurados
 - [x] **Security stack completo** (OPA Gatekeeper + Trivy Operator)
 - [x] **6 políticas de segurança** enforçadas via admission webhooks
 - [x] **Vulnerability scanning** automático de containers
+- [x] **SonarCloud** para análise de código estático (infra + app)
+- [x] **Code quality gates** em CI/CD pipelines
 - [x] Documentação completa (4000+ linhas)
 - [x] 47 deploys incrementais bem-sucedidos
 

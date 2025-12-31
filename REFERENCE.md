@@ -607,6 +607,12 @@ gcloud projects get-iam-policy ${PROJECT_ID}
 - **HTTPS:** https://dx03.ddns.net
 - **IP Estático:** 34.36.62.164
 
+### SonarCloud
+
+- **Organization:** https://sonarcloud.io/organizations/maringelix
+- **tx03 (Infra):** https://sonarcloud.io/project/overview?id=maringelix_tx03
+- **dx03 (App):** https://sonarcloud.io/project/overview?id=maringelix_dx03
+
 ### GCP Console
 
 - **Projeto:** https://console.cloud.google.com/home/dashboard?project=project-28e61e96-b6ac-4249-a21

@@ -13,6 +13,7 @@
 - [Componentes](#componentes)
 - [Políticas de Segurança](#políticas-de-segurança)
 - [Vulnerability Scanning](#vulnerability-scanning)
+- [Code Quality & Security Analysis](#code-quality--security-analysis)
 - [Configuração e Deploy](#configuração-e-deploy)
 - [Monitoramento](#monitoramento)
 - [Troubleshooting](#troubleshooting)
@@ -495,6 +496,186 @@ kubectl get infraassessmentreports -n dx03-dev
 
 ---
 
+## 📊 Code Quality & Security Analysis
+
+### SonarCloud Integration
+
+**Plataforma:** https://sonarcloud.io/organizations/maringelix/projects
+
+#### Projetos Monitorados
+
+##### 1. tx03 (Infraestrutura)
+
+**URL:** https://sonarcloud.io/project/overview?id=maringelix_tx03
+
+```
+Lines of Code:      3.8k
+Languages:          YAML, Terraform, HCL
+Last Analysis:      31/12/2025, 2:58 AM
+
+Security:           E (10 issues) 🔴
+Reliability:        A (0 issues) ✅
+Maintainability:    A (0 issues) ✅
+Hotspots Reviewed:  E (0.0%) 🔴
+Duplications:       0.0% ✅
+```
+
+**Issues Detectados:**
+- 🔴 10 Security issues (principalmente em configurações de secrets e permissões)
+- ✅ 0 Reliability bugs
+- ✅ 0 Code smells
+- 🔴 Security Hotspots não revisados (requer análise manual)
+
+**Prioridades:**
+1. Revisar os 10 security issues identificados
+2. Analisar Security Hotspots (configurações sensíveis)
+3. Implementar correções recomendadas
+4. Re-executar análise para validar fixes
+
+---
+
+##### 2. dx03 (Aplicação)
+
+**URL:** https://sonarcloud.io/project/overview?id=maringelix_dx03
+
+```
+Lines of Code:      1.5k
+Languages:          JavaScript, YAML
+Last Analysis:      31/12/2025, 2:58 AM
+
+Security:           C (4 issues) 🟡
+Reliability:        A (4 issues) ✅
+Maintainability:    A (19 issues) ✅
+Hotspots Reviewed:  E (0.0%) 🔴
+Duplications:       0.0% ✅
+```
+
+**Issues Detectados:**
+- 🟡 4 Security issues (validações, exposição de dados)
+- 🟡 4 Reliability issues (error handling)
+- 🟢 19 Maintainability code smells (minor)
+- 🔴 Security Hotspots não revisados
+
+**Prioridades:**
+1. Corrigir 4 security issues (validação de inputs)
+2. Melhorar error handling (4 issues)
+3. Refatorar code smells de baixa prioridade
+4. Revisar Security Hotspots
+
+---
+
+#### Quality Gates
+
+**Status Atual:** ❌ Failed (ambos projetos)
+
+**Critérios do Quality Gate:**
+- ✅ Security Rating: A (objetivo)
+- ✅ Reliability Rating: A (objetivo)
+- ✅ Maintainability Rating: A (objetivo)
+- ❌ Coverage: > 80% (objetivo)
+- ✅ Duplications: < 3%
+- ❌ Security Hotspots Reviewed: 100%
+
+**Ações Corretivas:**
+1. **tx03:** Reduzir de E para A em Security (10 issues)
+2. **dx03:** Melhorar de C para A em Security (4 issues)
+3. **Ambos:** Revisar 100% dos Security Hotspots
+4. **dx03:** Adicionar testes unitários (coverage atual baixa)
+
+---
+
+#### Integração CI/CD
+
+**Workflows GitHub Actions:**
+
+```yaml
+# .github/workflows/sonarcloud.yml
+name: SonarCloud Analysis
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+    branches: [master]
+
+jobs:
+  sonarcloud:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Shallow clones desabilitados para análise completa
+      
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=maringelix_tx03
+            -Dsonar.organization=maringelix
+```
+
+**Automatização:**
+- ✅ Análise automática em cada push/PR
+- ✅ Quality Gate check antes de merge
+- ✅ Comentários automáticos em PRs
+- ✅ Badge de status no README
+
+---
+
+#### Métricas e Dashboards
+
+**Principais Métricas:**
+
+```bash
+# Ver métricas via API
+curl -u "${SONAR_TOKEN}:" \
+  "https://sonarcloud.io/api/measures/component?component=maringelix_tx03&metricKeys=security_rating,reliability_rating,sqale_rating,vulnerabilities,bugs,code_smells"
+
+# Resposta (exemplo)
+{
+  "component": {
+    "key": "maringelix_tx03",
+    "measures": [
+      {"metric": "security_rating", "value": "5.0"},      # E
+      {"metric": "reliability_rating", "value": "1.0"},   # A
+      {"metric": "sqale_rating", "value": "1.0"},         # A (Maintainability)
+      {"metric": "vulnerabilities", "value": "10"},
+      {"metric": "bugs", "value": "0"},
+      {"metric": "code_smells", "value": "0"}
+    ]
+  }
+}
+```
+
+**Dashboards Disponíveis:**
+1. **Overview:** Issues por severidade e tipo
+2. **Security:** Vulnerabilidades e security hotspots
+3. **Reliability:** Bugs por severidade
+4. **Maintainability:** Technical debt e code smells
+5. **Coverage:** Test coverage por arquivo/componente
+6. **Duplications:** Código duplicado detectado
+
+---
+
+#### Trend Analysis
+
+**Evolução Histórica:**
+- 📈 Lines of Code: Crescimento controlado
+- 📉 Security Issues: tx03 (10) e dx03 (4) - requerem atenção
+- ✅ Reliability: Mantido em A para ambos
+- ✅ Maintainability: Estável em A
+- ❌ Coverage: Necessita implementação de testes
+
+**Objetivo Q1 2026:**
+- 🎯 Security Rating: A para ambos projetos (zero issues)
+- 🎯 Coverage: > 80% para dx03
+- 🎯 Security Hotspots: 100% revisados
+- 🎯 Quality Gate: PASSED para todos os projetos
+
+---
+
 ## ⚙️ Configuração e Deploy
 
 ### Pré-requisitos
@@ -588,6 +769,130 @@ gh run view --log
 ---
 
 ## 📊 Monitoramento
+
+### SonarCloud - Code Quality & Security Analysis
+
+**Plataforma:** https://sonarcloud.io/organizations/maringelix/projects
+
+#### Projetos Monitorados
+
+##### 1. tx03 (Infraestrutura)
+
+**URL:** https://sonarcloud.io/project/overview?id=maringelix_tx03
+
+```
+Lines of Code:      3.8k
+Languages:          YAML, Terraform, HCL
+Last Analysis:      31/12/2025, 2:58 AM
+
+Security:           E (10 issues) 🔴
+Reliability:        A (0 issues) ✅
+Maintainability:    A (0 issues) ✅
+Hotspots Reviewed:  E (0.0%) 🔴
+Duplications:       0.0% ✅
+```
+
+**Issues Detectados:**
+- 10 Security issues (principalmente em configurações de secrets e permissões)
+- 0 Reliability bugs
+- 0 Code smells
+- Security Hotspots não revisados (requer análise manual)
+
+**Próximas Ações:**
+1. Revisar os 10 security issues identificados
+2. Analisar Security Hotspots (configurações sensíveis)
+3. Implementar correções recomendadas
+4. Re-executar análise para validar fixes
+
+##### 2. dx03 (Aplicação)
+
+**URL:** https://sonarcloud.io/project/overview?id=maringelix_dx03
+
+```
+Lines of Code:      1.5k
+Languages:          JavaScript, YAML
+Last Analysis:      31/12/2025, 2:58 AM
+
+Security:           C (4 issues) 🟡
+Reliability:        A (4 issues) ✅
+Maintainability:    A (19 issues) ✅
+Hotspots Reviewed:  E (0.0%) 🔴
+Duplications:       0.0% ✅
+```
+
+**Issues Detectados:**
+- 4 Security issues (validações, exposição de dados)
+- 4 Reliability issues (error handling)
+- 19 Maintainability code smells (minor)
+- Security Hotspots não revisados
+
+**Próximas Ações:**
+1. Corrigir 4 security issues (validação de inputs)
+2. Melhorar error handling (4 issues)
+3. Refatorar code smells de baixa prioridade
+4. Revisar Security Hotspots
+
+#### Integração CI/CD
+
+**Workflows GitHub Actions:**
+
+```yaml
+# .github/workflows/sonarcloud.yml (exemplo)
+name: SonarCloud Analysis
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+    branches: [master]
+
+jobs:
+  sonarcloud:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Shallow clones desabilitados
+      
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+```
+
+#### Quality Gates
+
+**Status Atual:** ❌ Failed (ambos projetos)
+
+**Critérios do Quality Gate:**
+- Security Rating: A (objetivo)
+- Reliability Rating: A (objetivo)
+- Maintainability Rating: A (objetivo)
+- Coverage: > 80% (objetivo)
+- Duplications: < 3%
+- Security Hotspots Reviewed: 100%
+
+**Ações Corretivas:**
+1. **tx03:** Reduzir de E para A em Security (10 issues)
+2. **dx03:** Melhorar de C para A em Security (4 issues)
+3. **Ambos:** Revisar 100% dos Security Hotspots
+4. **dx03:** Adicionar testes unitários (coverage atual baixa)
+
+#### Métricas e Tendências
+
+```bash
+# Ver todas as métricas via API
+curl -u "${SONAR_TOKEN}:" \
+  "https://sonarcloud.io/api/measures/component?component=maringelix_tx03&metricKeys=security_rating,reliability_rating,sqale_rating,vulnerabilities,bugs,code_smells"
+```
+
+**Dashboards:**
+- Overview: Issues por severidade
+- Security: Vulnerabilidades e hotspots
+- Reliability: Bugs e code smells
+- Maintainability: Technical debt
+
+---
 
 ### Health Checks
 
