@@ -151,6 +151,8 @@ O Grafana vem com vários dashboards pré-configurados:
 
 ### Configuração do Slack
 
+✅ **Status:** CONFIGURADO E ATIVO
+
 1. Crie um Incoming Webhook no Slack:
    - https://api.slack.com/messaging/webhooks
    - Escolha o canal (#alerts recomendado)
@@ -166,17 +168,30 @@ O Grafana vem com vários dashboards pré-configurados:
    gh workflow run deploy-observability.yml --field action=upgrade
    ```
 
+**Configuração Atual:**
+- ✅ Secret `SLACK_WEBHOOK_URL` configurado no GitHub
+- ✅ Alertmanager reconfigurado com webhook válido
+- ✅ Canal: `#dx03-alerts`
+- ✅ Notificações ativas para alertas critical, warning e info
+
 ### Alertas Configurados
 
-**Alertas Críticos:**
+**Alertas Críticos (repeat: 4h):**
 - Pod crashlooping
 - Deployment com replicas insuficientes
 - Node com recursos críticos
+- Database connection failures
 
-**Alertas Warning:**
-- Alto uso de CPU/memória
-- Latência elevada
-- Erro rate acima do threshold
+**Alertas Warning (repeat: 12h):**
+- Alto uso de CPU/memória (>80%)
+- Latência elevada (P95 > 500ms)
+- Error rate acima do threshold (>5%)
+- Pool de conexões DB próximo do limite (>80%)
+
+**Alertas Info (repeat: 24h):**
+- Eventos de scaling
+- Deployment updates
+- Certificate renewal notices
 
 ## 🔍 Queries Úteis (PromQL)
 
@@ -368,4 +383,75 @@ kubectl delete namespace monitoring
 
 ---
 
-**Última atualização:** 30 de Dezembro de 2025
+## 🔐 Segurança e HTTPS
+
+### HTTPS Redirect
+
+✅ **Status:** ATIVO (implementado em 31/12/2025)
+
+**Configuração:**
+- Recurso: `FrontendConfig` (GKE-specific)
+- Comportamento: Redireciona todo tráfego HTTP → HTTPS (301 Moved Permanently)
+- Certificado: Google-managed SSL certificate (válido até 29/03/2026)
+- Aplicado em: Load Balancer Ingress
+
+**Arquivos:**
+- [k8s/frontend-config.yaml](https://github.com/maringelix/dx03/blob/master/k8s/frontend-config.yaml) - FrontendConfig resource
+- [k8s/ingress.yaml](https://github.com/maringelix/dx03/blob/master/k8s/ingress.yaml) - Ingress com annotation
+
+**Teste:**
+```bash
+# HTTP deve retornar 301 redirect
+curl -I http://dx03.ddns.net
+
+# Deve retornar:
+# HTTP/1.1 301 Moved Permanently
+# Location: https://dx03.ddns.net/
+```
+
+**Implementação:**
+```yaml
+# FrontendConfig
+apiVersion: networking.gke.io/v1beta1
+kind: FrontendConfig
+metadata:
+  name: dx03-frontend-config
+spec:
+  redirectToHttps:
+    enabled: true
+    responseCodeName: "MOVED_PERMANENTLY_DEFAULT"
+
+# Ingress annotation
+metadata:
+  annotations:
+    networking.gke.io/v1beta1.FrontendConfig: "dx03-frontend-config"
+```
+
+---
+
+## 📊 Histórico de Implementação
+
+### Session 31/12/2025 - HTTPS Redirect + Slack Alerts
+
+**Implementações:**
+1. ✅ **HTTPS Redirect** via FrontendConfig
+   - Criado recurso FrontendConfig
+   - Atualizado Ingress com annotation
+   - Workflow deploy atualizado
+   - Commits: `f44fccc`, `2e43c1f`
+
+2. ✅ **Slack Alertmanager**
+   - Diagnosticado: Secret `SLACK_WEBHOOK_URL` não configurado
+   - Configurado secret no GitHub
+   - Re-deploy observability executado
+   - Alertmanager com webhook ativo
+   - Run ID: `20612370155` (success)
+
+**Resultados:**
+- Todo tráfego HTTP → HTTPS (301)
+- Alertas Prometheus → Slack `#dx03-alerts`
+- Zero downtime nas mudanças
+
+---
+
+**Última atualização:** 31 de Dezembro de 2025

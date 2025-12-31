@@ -40,7 +40,7 @@ Este repositório contém a infraestrutura do **tx03**, o terceiro projeto da s�
 
 ## 🎉 Status do Projeto
 
-**Última Atualização:** 29 de Dezembro de 2025
+**Última Atualização:** 31 de Dezembro de 2025
 
 ### ✅ Infraestrutura - 100% OPERACIONAL
 - **Status:** 🟢 PRODUÇÃO - Totalmente funcional
@@ -115,8 +115,10 @@ Dashboards:                4 dashboards configurados
 ✅ **Cloud Armor WAF ativo** em todos os backend services  
 ✅ **SSL/TLS com certificado Google-managed** (válido até 2026)  
 ✅ **Domínio customizado** (dx03.ddns.net) com HTTPS  
+✅ **HTTPS redirect automático** (HTTP → HTTPS 301) via FrontendConfig  
+✅ **Slack alerts integrado** ao Alertmanager (notificações em tempo real)  
 ✅ **Zero downtime** no ambiente final  
-✅ **47 deploys incrementais** documentados  
+✅ **49+ deploys incrementais** documentados  
 ✅ **Aplicação 100% funcional** em produção  
 ✅ **Observabilidade completa** com stack Prometheus + Grafana + Alertmanager  
 ✅ **Métricas instrumentadas** no backend Node.js (prom-client)  
@@ -159,17 +161,40 @@ Dashboards:                4 dashboards configurados
 
 ### 🎯 Próximos Passos
 
-#### Fase 8: Otimização & Produção (Opcional)
-- [ ] **HTTP → HTTPS Redirect**: Forçar todo tráfego usar HTTPS
-- [ ] **Horizontal Pod Autoscaler (HPA)**: Scaling automático baseado em CPU/memória
-- [ ] **Cloud CDN**: Cache global para assets estáticos
-- [ ] **Backup Automation**: Cloud SQL backups automatizados diários
-- [ ] **Uptime Checks**: Alertas automáticos quando aplicação cair
-- [ ] **Cloud Trace APM**: Rastreamento distribuído de requisições
-- [ ] **Staging Environment**: Ambiente de homologação separado
-- [ ] **Blue-Green Deployment**: Zero downtime deployments avançados
-- [ ] **Cost Optimization**: Rightsizing de recursos e budgets
-- [ ] **Multi-region**: Alta disponibilidade em múltiplas regiões
+#### ✅ Concluídos Recentemente (31/12/2025)
+- [x] **HTTP → HTTPS Redirect**: Todo tráfego HTTP redireciona para HTTPS (301) ✅
+- [x] **Slack Alerts**: Alertmanager integrado com Slack para notificações em tempo real ✅
+
+#### Fase 8: Otimização & Produção (Alta Prioridade)
+- [ ] **Horizontal Pod Autoscaler (HPA)** - 20 min
+  - Scaling automático baseado em CPU/memória
+  - Min/max replicas configuráveis
+  - Melhora resiliência e reduz custos
+  
+- [ ] **Backups Cloud SQL Automatizados** - 30 min
+  - Backups diários automáticos
+  - Retenção configurável (7-30 dias)
+  - Point-in-time recovery
+  
+- [ ] **Uptime Monitoring** - 20 min
+  - Cloud Monitoring health checks externos
+  - Alertas de indisponibilidade via Slack
+  - SLA tracking
+
+#### Fase 9: Alertas Customizados (Média Prioridade)
+- [ ] **Custom Prometheus Alerts** - 30 min
+  - Error rate > 5%
+  - Latência P95 > 500ms
+  - DB connections > 80%
+  - Memory usage > 85%
+
+#### Fase 10: Otimizações Avançadas (Opcional)
+- [ ] **Cloud CDN** - 40 min: Cache global para assets estáticos
+- [ ] **Staging Environment** - 1-2h: Ambiente de homologação separado
+- [ ] **Cloud Trace APM** - 30 min: Rastreamento distribuído de requisições
+- [ ] **Blue-Green Deployment** - 2-3h: Zero downtime deployments avançados
+- [ ] **Cost Optimization** - 30 min: Rightsizing de recursos e budgets
+- [ ] **Multi-region** - 2-3h: Alta disponibilidade em múltiplas regiões
 
 > 📚 **Documentação Detalhada:**
 > - [dx03/DEPLOYMENT_STATUS.md](https://github.com/maringelix/dx03/blob/master/DEPLOYMENT_STATUS.md) - Status completo da aplicação (523 linhas)
