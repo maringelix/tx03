@@ -5,9 +5,10 @@
 Este documento detalha a implementação completa do Istio Service Mesh no cluster GKE do projeto TX03, incluindo todos os desafios enfrentados, soluções implementadas e workflows de CI/CD criados.
 
 **Data de Implementação**: 31 de Dezembro de 2025  
-**Status**: ✅ Infraestrutura Completa | ⏳ Sidecar Injection Pendente  
+**Status**: ✅ Infraestrutura 100% | 🔄 Sidecar Injection Em Progresso (pods recriando)  
 **Versão do Istio**: 1.20.1  
-**Cluster**: tx03-gke-cluster (GKE Autopilot, us-central1)
+**Cluster**: tx03-gke-cluster (GKE Autopilot, us-central1)  
+**Última Atualização**: 31/12/2025 20:45 UTC
 
 ---
 
@@ -47,13 +48,23 @@ Este documento detalha a implementação completa do Istio Service Mesh no clust
 
 6. **Automação CI/CD**
    - **deploy-istio.yml**: Workflow para instalação base do Istio
-   - **istio-apply-configs.yml**: Workflow para aplicar/atualizar configurações
+   - **istio-apply-configs.yml**: Workflow para aplicar/atualizar configurações + FORCE DELETE ✅
+   - **istio-fix-sidecar.yml**: Workflow de diagnóstico (deprecated - integrado ao istio-apply-configs)
    - Ambos workflows testados e funcionando ✅
+
+7. **Sidecar Injection Fix** (31/12/2025 20:45)
+   - Identificado: `rollout restart` não injeta sidecars em pods pré-existentes
+   - Solução: `force_delete` option que executa `kubectl delete pod --all`
+   - Implementado: Step de diagnóstico automático com validação
+   - Status: Pods deletados ✅, aguardando recriação (5-10 min)
+   - Documentação completa: `docs/ISTIO-SIDECAR-FIX.md`
 
 7. **Documentação Completa**
    - README.md atualizado com seção Istio
    - REFERENCE.md atualizado com comandos úteis
    - k8s/istio/README.md com guia completo (463 linhas)
+   - docs/ISTIO-IMPLEMENTATION.md - Histórico completo (747 linhas)
+   - docs/ISTIO-SIDECAR-FIX.md - Resolução do problema de injection
    - Este documento de implementação
 
 ### ⏳ Pendentes
