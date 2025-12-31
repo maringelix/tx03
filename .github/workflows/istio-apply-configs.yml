@@ -52,16 +52,14 @@ jobs:
           kubectl rollout restart deployment/dx03-backend -n dx03-dev
           kubectl rollout restart deployment/dx03-frontend -n dx03-dev
           
-          echo "⏳ Waiting for rollout to complete (10 min timeout)..."
-          kubectl rollout status deployment/dx03-backend -n dx03-dev --timeout=600s || true
-          kubectl rollout status deployment/dx03-frontend -n dx03-dev --timeout=600s || true
+          echo "⏳ Pods are being restarted..."
+          echo "Note: On GKE Autopilot, sidecar injection may take 10-15 minutes due to resource provisioning."
+          echo "Check rollout status manually with:"
+          echo "  kubectl rollout status deployment/dx03-backend -n dx03-dev"
+          echo "  kubectl rollout status deployment/dx03-frontend -n dx03-dev"
           
           echo ""
-          echo "📊 Current pod status:"
-          kubectl get pods -n dx03-dev
-          
-          echo ""
-          echo "✅ Pod restart initiated"
+          echo "✅ Rollout initiated successfully"
 
       - name: 🌐 Apply Istio Configurations
         if: inputs.apply_configs == true

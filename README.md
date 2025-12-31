@@ -93,6 +93,28 @@ Este repositório contém a infraestrutura do **tx03**, o terceiro projeto da s�
 - **Retenção:** 7 dias (Prometheus) + PVC persistente (Grafana 5Gi)
 - **📚 Documentação Completa:** [OBSERVABILITY.md](OBSERVABILITY.md) | [k8s/observability/README.md](k8s/observability/README.md)
 
+### 🕸️ Service Mesh (Istio) - EM IMPLEMENTAÇÃO
+- **Status:** 🟡 **INSTALAÇÃO BASE COMPLETA**
+- **Versão:** Istio 1.20.1
+- **Profile:** default
+- **Componentes Instalados:**
+  - ✅ **Istiod:** Control plane (service discovery, config, certificate management)
+  - ✅ **Istio Ingress Gateway:** Gateway de entrada para tráfego externo
+  - ✅ **Kiali:** Service mesh observability dashboard
+  - ✅ **Jaeger:** Distributed tracing
+  - ✅ **Prometheus:** Métricas do service mesh (integrado)
+  - ✅ **Grafana:** Dashboards do Istio
+- **Namespace:** `istio-system` (control plane) + `dx03-dev` (data plane - injection habilitado)
+- **Configurações:**
+  - 🔄 **mTLS Mode:** PERMISSIVE (migração gradual)
+  - 🔄 **Gateway:** dx03.ddns.net (HTTP/HTTPS routing)
+  - 🔄 **VirtualService:** Roteamento para backend (/api) e frontend (/)
+  - 🔄 **DestinationRules:** Circuit breaking + load balancing
+  - 🔄 **Telemetry:** Access logs + Jaeger tracing (100% sampling)
+- **Sidecar Injection:** Label `istio-injection=enabled` configurado
+- **Status dos Pods:** Aguardando restart para injeção de sidecars (2/2 containers)
+- **📚 Documentação:** [k8s/istio/README.md](k8s/istio/README.md) (463 linhas)
+
 ### � Code Quality - SonarCloud
 - **Status:** 🟢 **MONITORADO**
 - **Plataforma:** SonarCloud
@@ -167,8 +189,10 @@ Dashboards:                4 dashboards configurados
 ✅ **Vulnerability scanning automático** de todas as imagens  
 ✅ **SonarCloud integrado** para análise de código contínua  
 ✅ **Code quality monitoring** em infraestrutura e aplicação  
-✅ **Documentação completa** (4000+ linhas) publicada no GitHub  
+✅ **Documentação completa** (5000+ linhas) publicada no GitHub  
 ✅ **CI/CD pipeline** totalmente automatizado  
+✅ **Istio Service Mesh** - Base instalada (istiod + ingress gateway + addons)  
+🔄 **Istio Sidecar Injection** - Em progresso (aguardando restart de pods)  
 
 ### 🎯 Conquistas Técnicas
 
@@ -263,14 +287,31 @@ Dashboards:                4 dashboards configurados
 - [x] **Documentação Completa**: 5.3k+ linhas total
 - [x] **README.md**: Badges do SonarCloud adicionados
 
-#### 🔴 Fase 11: Code Quality Improvements (Em Progresso)
+#### � Fase 11: Service Mesh (Istio) - Em Progresso
+- [x] **Istio Installation**: Versão 1.20.1 via istioctl (default profile)
+- [x] **Control Plane**: Istiod deployado em istio-system namespace
+- [x] **Ingress Gateway**: Istio Ingress Gateway configurado
+- [x] **Observability Addons**: Kiali + Jaeger + Prometheus + Grafana
+- [x] **Namespace Injection**: dx03-dev com label istio-injection=enabled
+- [x] **Configuration Files**: Gateway, VirtualService, DestinationRules, Security, Telemetry
+- [x] **Workflow**: deploy-istio.yml funcionando (instalação base)
+- [x] **Documentation**: k8s/istio/README.md (463 linhas)
+- [ ] **Sidecar Injection**: Restart de pods para injeção de sidecars (2/2 containers)
+- [ ] **Apply Configurations**: Gateway, Security, Telemetry
+- [ ] **Verify mTLS**: Testar comunicação mTLS PERMISSIVE entre services
+- [ ] **Test Traffic Management**: Validar routing via Istio Ingress Gateway
+- [ ] **Access Dashboards**: Kiali (service topology) + Jaeger (distributed tracing)
+- [ ] **Enable STRICT mTLS**: Após validação com PERMISSIVE
+- [ ] **Authorization Policies**: Habilitar deny-all + allow específico
+
+#### 🔴 Fase 12: Code Quality Improvements (Pendente)
 - [x] **SonarCloud Integration**: tx03 + dx03 monitorados ✅
 - [ ] **Fix Security Issues**: tx03 (10 issues E→A) | dx03 (4 issues C→A)
 - [ ] **Review Security Hotspots**: 100% cobertura necessária
 - [ ] **Unit Tests**: Aumentar coverage para > 80% (dx03)
 - [ ] **Quality Gate**: Passar todos os critérios (PASSED)
 
-#### Fase 12: Otimização & Produção (Pendente)
+#### Fase 13: Otimização & Produção (Pendente)
 - [ ] **Horizontal Pod Autoscaler (HPA)** - 20 min
   - Scaling automático baseado em CPU/memória
   - Min/max replicas configuráveis
@@ -292,7 +333,7 @@ Dashboards:                4 dashboards configurados
   - DB connections > 80%
   - Memory usage > 85%
 
-#### Fase 13: Otimizações Avançadas (Opcional)
+#### Fase 14: Otimizações Avançadas (Opcional)
 - [ ] **Cloud CDN** - 40 min: Cache global para assets estáticos
 - [ ] **Staging Environment** - 1-2h: Ambiente de homologação separado
 - [ ] **Cloud Trace APM** - 30 min: Rastreamento distribuído de requisições
@@ -308,6 +349,7 @@ Dashboards:                4 dashboards configurados
 > - **[OBSERVABILITY.md](OBSERVABILITY.md)** - Stack de Observabilidade (Prometheus + Grafana + Alertmanager)
 > - **[SECURITY.md](SECURITY.md)** - Security Stack completa (OPA Gatekeeper + Trivy + SonarCloud)
 > - **[REFERENCE.md](REFERENCE.md)** - Guia de referência rápida com todos os comandos
+> - **[k8s/istio/README.md](k8s/istio/README.md)** - Service Mesh Istio (463 linhas)
 > - [k8s/observability/README.md](k8s/observability/README.md) - Configuração detalhada de observabilidade
 > - [k8s/security/README.md](k8s/security/README.md) - Políticas e constraints de segurança
 

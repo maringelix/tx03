@@ -14,6 +14,7 @@
 - [Comandos Kubernetes](#comandos-kubernetes)
 - [Observabilidade](#observabilidade)
 - [Segurança](#segurança)
+- [Service Mesh (Istio)](#service-mesh-istio)
 - [CI/CD](#cicd)
 - [Troubleshooting](#troubleshooting)
 - [Links Úteis](#links-úteis)
@@ -46,6 +47,7 @@ APP_NAMESPACE="dx03-dev"
 MONITORING_NAMESPACE="monitoring"
 GATEKEEPER_NAMESPACE="gatekeeper-system"
 TRIVY_NAMESPACE="trivy-system"
+ISTIO_SYSTEM_NAMESPACE="istio-system"
 ```
 
 ### Repositórios
@@ -96,6 +98,15 @@ kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9
 
 # Backend direto (http://localhost:3000)
 kubectl port-forward -n dx03-dev svc/dx03-backend 3000:3000
+
+# Kiali - Service Mesh Dashboard (http://localhost:20001)
+kubectl port-forward -n istio-system svc/kiali 20001:20001
+
+# Jaeger - Distributed Tracing (http://localhost:16686)
+kubectl port-forward -n istio-system svc/tracing 16686:80
+
+# Istio Grafana (http://localhost:3002)
+kubectl port-forward -n istio-system svc/grafana 3002:3000
 ```
 
 ### Credenciais
@@ -435,7 +446,114 @@ kubectl annotate pod <pod-name> -n dx03-dev \
 
 ---
 
-## 🔄 CI/CD
+## �️ Service Mesh (Istio)
+
+### Verificar Istio
+
+```bash
+# Status do Istio
+kubectl get pods -n istio-system
+
+# Versão do Istio
+kubectl get deploy -n istio-system istiod -o yaml | grep image:
+
+# Gateway
+kubectl get gateway -n dx03-dev
+
+# VirtualServices
+kubectl get virtualservice -n dx03-dev
+
+# DestinationRules
+kubectl get destinationrule -n dx03-dev
+
+# PeerAuthentication (mTLS)
+kubectl get peerauthentication -n dx03-dev
+
+# AuthorizationPolicies
+kubectl get authorizationpolicy -n dx03-dev
+```
+
+### Validar mTLS
+
+```bash
+# Verificar mTLS entre services
+istioctl authn tls-check <pod-name>.<namespace>
+
+# Ver certificados
+istioctl proxy-config secret <pod-name> -n dx03-dev
+
+# Testar comunicação
+kubectl exec -n dx03-dev <frontend-pod> -- curl -v http://dx03-backend:3000/health
+```
+
+### Troubleshooting Istio
+
+```bash
+# Verificar sidecar injection
+kubectl get pods -n dx03-dev -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].name}{"\n"}{end}'
+
+# Deve mostrar 2/2 containers (app + istio-proxy)
+kubectl get pods -n dx03-dev
+
+# Ver logs do sidecar
+kubectl logs -n dx03-dev <pod-name> -c istio-proxy
+
+# Analyze configuration
+istioctl analyze -n dx03-dev
+
+# Debug proxy config
+istioctl proxy-config listener <pod-name> -n dx03-dev
+istioctl proxy-config route <pod-name> -n dx03-dev
+istioctl proxy-config cluster <pod-name> -n dx03-dev
+```
+
+### Restart Pods para Sidecar Injection
+
+```bash
+# Restart deployments
+kubectl rollout restart deployment/dx03-backend -n dx03-dev
+kubectl rollout restart deployment/dx03-frontend -n dx03-dev
+
+# Verificar rollout
+kubectl rollout status deployment/dx03-backend -n dx03-dev
+kubectl rollout status deployment/dx03-frontend -n dx03-dev
+
+# Verificar pods com sidecars
+kubectl get pods -n dx03-dev
+# Deve mostrar 2/2 (app + istio-proxy)
+```
+
+### Acessar Dashboards Istio
+
+```bash
+# Kiali (Service Mesh Topology)
+kubectl port-forward -n istio-system svc/kiali 20001:20001
+# http://localhost:20001
+
+# Jaeger (Distributed Tracing)
+kubectl port-forward -n istio-system svc/tracing 16686:80
+# http://localhost:16686
+
+# Grafana Istio
+kubectl port-forward -n istio-system svc/grafana 3002:3000
+# http://localhost:3002
+```
+
+### Métricas Istio
+
+```bash
+# Ver métricas Prometheus do Istio
+kubectl port-forward -n istio-system svc/prometheus 9090:9090
+
+# Queries úteis:
+# - istio_requests_total
+# - istio_request_duration_milliseconds
+# - istio_tcp_connections_opened_total
+```
+
+---
+
+## �🔄 CI/CD
 
 ### GitHub Actions Workflows
 
@@ -595,6 +713,7 @@ gcloud projects get-iam-policy ${PROJECT_ID}
 
 - **Observability Stack:** [k8s/observability/README.md](k8s/observability/README.md)
 - **Security Stack:** [k8s/security/README.md](k8s/security/README.md)
+- **Service Mesh (Istio):** [k8s/istio/README.md](k8s/istio/README.md)
 
 ### Repositórios
 
@@ -657,6 +776,13 @@ gcloud projects get-iam-policy ${PROJECT_ID}
 - Trivy Operator: 1/1 pod RUNNING
 - Políticas: 6 ativas
 - Scanning: AUTOMÁTICO
+
+### 🟡 Service Mesh (Istio)
+- Istiod: RUNNING
+- Istio Ingress Gateway: RUNNING
+- Kiali: ACCESSIBLE (port 20001)
+- Jaeger: ACCESSIBLE (port 16686)
+- Sidecar Injection: PENDING (aguardando restart)
 
 ---
 
