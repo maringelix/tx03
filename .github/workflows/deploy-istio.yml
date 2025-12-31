@@ -171,17 +171,27 @@ jobs:
           
           echo "✅ Pods restarted with sidecars"
           
-      - name: ⚠️ Manual Configuration Required
+      - name: 🌐 Apply Istio Configurations
         if: inputs.action == 'install' || inputs.action == 'upgrade'
         run: |
-          echo "⚠️ IMPORTANT: Apply Istio configurations manually after verifying pods are healthy"
-          echo ""
-          echo "Run these commands to apply configurations:"
-          echo "  kubectl apply -f k8s/istio/gateway.yaml"
-          echo "  kubectl apply -f k8s/istio/telemetry.yaml"  
-          echo "  kubectl apply -f k8s/istio/security.yaml"
-          echo ""
-          echo "✅ Istio base installation complete!"
+          echo "🌐 Applying Istio configurations (PERMISSIVE mode)..."
+          
+          if [ -f "k8s/istio/gateway.yaml" ]; then
+            kubectl apply -f k8s/istio/gateway.yaml
+            echo "✅ Gateway applied"
+          fi
+          
+          if [ -f "k8s/istio/telemetry.yaml" ]; then
+            kubectl apply -f k8s/istio/telemetry.yaml
+            echo "✅ Telemetry applied"
+          fi
+          
+          if [ -f "k8s/istio/security.yaml" ]; then
+            kubectl apply -f k8s/istio/security.yaml
+            echo "✅ Security policies applied (PERMISSIVE mTLS)"
+          fi
+          
+          echo "✅ All Istio configurations applied!"
 
       - name: 📊 Display Istio Status
         if: inputs.action == 'install' || inputs.action == 'upgrade'

@@ -9,19 +9,20 @@ metadata:
   namespace: dx03-dev
 spec:
   mtls:
-    mode: STRICT # Enforce mTLS for all traffic
+    mode: PERMISSIVE # Allow both mTLS and plaintext (for gradual migration)
 ---
 # ============================================================================
-# AuthorizationPolicy - Default Deny All
+# AuthorizationPolicy - Default Deny All (DISABLED for initial setup)
 # ============================================================================
 # Deny all traffic by default (whitelist approach)
-apiVersion: security.istio.io/v1beta1
-kind: AuthorizationPolicy
-metadata:
-  name: deny-all
-  namespace: dx03-dev
-spec:
-  {} # Empty spec = deny all
+# COMMENTED OUT: Enable after verifying service mesh is working
+# apiVersion: security.istio.io/v1beta1
+# kind: AuthorizationPolicy
+# metadata:
+#   name: deny-all
+#   namespace: dx03-dev
+# spec:
+#   {} # Empty spec = deny all
 ---
 # ============================================================================
 # AuthorizationPolicy - Allow Frontend to Backend
