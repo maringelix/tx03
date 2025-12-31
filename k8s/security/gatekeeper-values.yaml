@@ -1,12 +1,13 @@
 # OPA Gatekeeper Helm Values
 # Policy-as-Code Admission Controller for Kubernetes
+# GKE Autopilot Compatible Configuration
 
 enableExternalData: false
 enableGeneratorResourceExpansion: false
 logLevel: INFO
 auditInterval: 60
 constraintViolationsLimit: 20
-replicas: 2
+replicas: 1
 
 image:
   repository: openpolicyagent/gatekeeper
@@ -34,6 +35,51 @@ audit:
       cpu: 100m
       memory: 128Mi
 
+# GKE Autopilot specific settings
+webhookOperations:
+  - create
+  - update
+
+# Webhook configuration - GKE Autopilot requires specific rules
+validatingWebhookConfiguration:
+  webhooks:
+    - admissionReviewVersions: ["v1"]
+      clientConfig:
+        service:
+          name: gatekeeper-webhook-service
+          namespace: gatekeeper-system
+          path: /v1/admit
+        caBundle: ""
+      failurePolicy: Fail
+      matchPolicy: Exact
+      name: gatekeeper.sh
+      namespaceSelector:
+        matchExpressions:
+          - key: gatekeeper.sh/ignore
+            operator: NotIn
+            values: ["true"]
+          - key: control-plane
+            operator: NotIn
+            values: ["true"]
+      rules:
+        - apiGroups: [""]
+          apiVersions: ["v1"]
+          operations: ["CREATE", "UPDATE"]
+          resources: ["pods"]
+          scope: Namespaced
+        - apiGroups: ["apps"]
+          apiVersions: ["v1"]
+          operations: ["CREATE", "UPDATE"]
+          resources: ["deployments", "daemonsets", "statefulsets"]
+          scope: Namespaced
+        - apiGroups: ["batch"]
+          apiVersions: ["v1"]
+          operations: ["CREATE", "UPDATE"]
+          resources: ["jobs", "cronjobs"]
+          scope: Namespaced
+      sideEffects: None
+      timeoutSeconds: 5
+
 # Pod Security Standards
 podSecurityStandards:
   enforced:
@@ -41,7 +87,7 @@ podSecurityStandards:
 
 # Network Policy
 networkPolicy:
-  enabled: true
+  enabled: false  # Disabled for GKE Autopilot
 
 # RBAC
 rbac:
@@ -63,3 +109,7 @@ affinity:
               operator: In
               values:
                 - linux
+
+# Disable admission webhook controller
+admissionWebhookController:
+  enabled: true
