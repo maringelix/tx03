@@ -122,18 +122,19 @@ jobs:
         run: |
           echo "🔧 Installing ASM (Anthos Service Mesh)..."
           
-          # Enable required APIs
-          echo "📡 Enabling required GCP APIs..."
-          gcloud services enable mesh.googleapis.com --project=${{ env.GCP_PROJECT_ID }}
-          gcloud services enable anthos.googleapis.com --project=${{ env.GCP_PROJECT_ID }}
-          gcloud services enable gkehub.googleapis.com --project=${{ env.GCP_PROJECT_ID }}
-          
           # Register cluster to fleet (if not already)
           echo "🚢 Registering cluster to fleet..."
           gcloud container fleet memberships register ${{ env.CLUSTER_NAME }} \
             --gke-cluster=${{ env.GCP_REGION }}/${{ env.CLUSTER_NAME }} \
             --enable-workload-identity \
-            --project=${{ env.GCP_PROJECT_ID }} || echo "ℹ️ Cluster already registered"
+            --project=${{ env.GCP_PROJECT_ID }} 2>&1 | tee /tmp/fleet-register.log || echo "ℹ️ Cluster may already be registered"
+          
+          # Check if registration was successful or already exists
+          if gcloud container fleet memberships describe ${{ env.CLUSTER_NAME }} --project=${{ env.GCP_PROJECT_ID }} > /dev/null 2>&1; then
+            echo "✅ Cluster registered in fleet"
+          else
+            echo "⚠️ Fleet registration issue, continuing..."
+          fi
           
           # Validate prerequisites
           echo "✅ Validating ASM prerequisites..."
@@ -142,7 +143,7 @@ jobs:
             --cluster_name ${{ env.CLUSTER_NAME }} \
             --cluster_location ${{ env.GCP_REGION }} \
             --fleet_id ${{ env.GCP_PROJECT_ID }} \
-            --output_dir ./asm-validation || echo "⚠️ Validation warnings (may be ok)"
+            --output_dir ./asm-validation 2>&1 | tee /tmp/asm-validate.log || echo "⚠️ Validation warnings (proceeding anyway)"
           
           # Install ASM
           echo "🚀 Installing ASM..."
@@ -155,9 +156,18 @@ jobs:
             --enable_all \
             --ca mesh_ca \
             --option legacy-default-ingressgateway \
-            --verbose
+            --verbose 2>&1 | tee /tmp/asm-install.log
           
-          echo "✅ ASM installation complete!"
+          ASM_EXIT_CODE=$?
+          
+          if [ $ASM_EXIT_CODE -eq 0 ]; then
+            echo "✅ ASM installation complete!"
+          else
+            echo "❌ ASM installation failed with exit code $ASM_EXIT_CODE"
+            echo "📋 Last 50 lines of installation log:"
+            tail -50 /tmp/asm-install.log
+            exit $ASM_EXIT_CODE
+          fi
 
       - name: 📊 Check Istio Status
         run: |
