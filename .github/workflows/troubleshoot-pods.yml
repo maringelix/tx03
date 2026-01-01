@@ -1,0 +1,137 @@
+name: Troubleshoot Pods
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: project-28e61e96-b6ac-4249-a21f
+  GCP_REGION: us-central1
+  CLUSTER_NAME: tx03-gke-cluster
+
+jobs:
+  troubleshoot:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          install_components: 'gke-gcloud-auth-plugin'
+
+      - name: Configure kubectl
+        run: |
+          gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} \
+            --region ${{ env.GCP_REGION }} \
+            --project ${{ env.GCP_PROJECT_ID }}
+
+      - name: 🔍 Check Deployments
+        run: |
+          echo "======================================"
+          echo "📊 DEPLOYMENTS STATUS"
+          echo "======================================"
+          echo ""
+          kubectl get deployments -n dx03-dev
+          echo ""
+          echo "Detailed deployment info:"
+          kubectl describe deployment -n dx03-dev
+
+      - name: 🔍 Check ReplicaSets
+        run: |
+          echo ""
+          echo "======================================"
+          echo "📊 REPLICASETS STATUS"
+          echo "======================================"
+          echo ""
+          kubectl get replicasets -n dx03-dev
+          echo ""
+          echo "Detailed replicaset info:"
+          kubectl describe replicaset -n dx03-dev | head -100
+
+      - name: 🔍 Check Pods
+        run: |
+          echo ""
+          echo "======================================"
+          echo "📊 PODS STATUS"
+          echo "======================================"
+          echo ""
+          kubectl get pods -n dx03-dev -o wide
+          echo ""
+          if [ $(kubectl get pods -n dx03-dev -o json | jq '.items | length') -gt 0 ]; then
+            echo "Pod details:"
+            kubectl describe pods -n dx03-dev | head -200
+          else
+            echo "⚠️ No pods found!"
+          fi
+
+      - name: 🔍 Check Events
+        run: |
+          echo ""
+          echo "======================================"
+          echo "📊 RECENT EVENTS"
+          echo "======================================"
+          echo ""
+          kubectl get events -n dx03-dev --sort-by='.lastTimestamp' | tail -50
+
+      - name: 🔍 Check Namespace
+        run: |
+          echo ""
+          echo "======================================"
+          echo "📊 NAMESPACE INFO"
+          echo "======================================"
+          echo ""
+          kubectl get namespace dx03-dev --show-labels
+          kubectl describe namespace dx03-dev
+
+      - name: 🔍 Check Istio Webhook
+        run: |
+          echo ""
+          echo "======================================"
+          echo "📊 ISTIO WEBHOOK STATUS"
+          echo "======================================"
+          echo ""
+          kubectl get mutatingwebhookconfiguration istio-sidecar-injector -o yaml | grep -A20 namespaceSelector
+
+      - name: 🔍 Check Resource Quotas
+        run: |
+          echo ""
+          echo "======================================"
+          echo "📊 RESOURCE QUOTAS"
+          echo "======================================"
+          echo ""
+          kubectl get resourcequotas -n dx03-dev || echo "No resource quotas found"
+          kubectl describe resourcequotas -n dx03-dev || echo "No resource quotas to describe"
+
+      - name: 📋 Summary
+        run: |
+          echo ""
+          echo "======================================"
+          echo "📋 TROUBLESHOOTING SUMMARY"
+          echo "======================================"
+          echo ""
+          
+          DEPLOYMENTS=$(kubectl get deployments -n dx03-dev -o json | jq '.items | length')
+          PODS=$(kubectl get pods -n dx03-dev -o json | jq '.items | length')
+          
+          echo "Deployments: $DEPLOYMENTS"
+          echo "Pods: $PODS"
+          echo ""
+          
+          if [ "$PODS" -eq 0 ] && [ "$DEPLOYMENTS" -gt 0 ]; then
+            echo "❌ ISSUE: Deployments exist but no pods!"
+            echo "Check events and deployment descriptions above for root cause"
+          elif [ "$PODS" -gt 0 ]; then
+            echo "✅ Pods found! Check their status above"
+          else
+            echo "⚠️ No deployments or pods found - may have been deleted"
+          fi
