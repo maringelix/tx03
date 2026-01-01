@@ -93,34 +93,52 @@ Este repositório contém a infraestrutura do **tx03**, o terceiro projeto da s�
 - **Retenção:** 7 dias (Prometheus) + PVC persistente (Grafana 5Gi)
 - **📚 Documentação Completa:** [OBSERVABILITY.md](OBSERVABILITY.md) | [k8s/observability/README.md](k8s/observability/README.md)
 
-### 🕸️ Service Mesh (Istio) - INFRAESTRUTURA INSTALADA
-- **Status:** 🟡 **BASE INSTALADA - SIDECAR INJECTION DESABILITADO**
-- **Versão:** Istio 1.20.1
-- **Profile:** default
-- **Componentes Instalados:**
-  - ✅ **Istiod:** Control plane (service discovery, config, certificate management)
-  - ✅ **Istio Ingress Gateway:** Gateway de entrada para tráfego externo
-  - ✅ **Kiali:** Service mesh observability dashboard
-  - ✅ **Jaeger:** Distributed tracing
-  - ✅ **Prometheus:** Métricas do service mesh (integrado)
-  - ✅ **Grafana:** Dashboards do Istio
-- **Namespace:** `istio-system` (control plane) + `dx03-dev` (data plane)
-- **Configurações Aplicadas:**
-  - ✅ **mTLS Mode:** PERMISSIVE (configurado mas não ativo)
-  - ✅ **Gateway:** dx03.ddns.net (HTTP/HTTPS routing)
-  - ✅ **VirtualService:** Roteamento para backend (/api) e frontend (/)
-  - ✅ **DestinationRules:** Circuit breaking + load balancing
-  - ✅ **Telemetry:** Access logs + Jaeger tracing (100% sampling)
-- **⚠️ GKE Autopilot Limitation:** 
-  - **Sidecar Injection:** ❌ Desabilitado (incompatível com GKE Autopilot)
-  - **Motivo:** GKE Warden bloqueia Istio proxy sidecars por violação de políticas de segurança
-  - **Status dos Pods:** 1/1 containers (sem `istio-proxy` sidecar)
-  - **Alternativas:** Istio Ambient Mesh (eBPF) ou ASM (Anthos Service Mesh)
-- **📚 Documentação:** 
-  - [k8s/istio/README.md](k8s/istio/README.md) - Guia de instalação (463 linhas)
-  - [docs/GKE-WARDEN-ISSUE.md](docs/GKE-WARDEN-ISSUE.md) - Issue crítico e soluções (180 linhas)
+### 🕸️ Service Mesh Solutions - READY TO DEPLOY
+- **Status:** 🟢 **SOLUÇÕES ALTERNATIVAS IMPLEMENTADAS**
+- **Current State:** App running without service mesh (1/1 containers)
+- **Problem:** GKE Autopilot Warden blocks standard Istio sidecar injection
 
-### � Code Quality - SonarCloud
+#### ⭐ Solution 1: Istio Ambient Mesh (RECOMMENDED - Free)
+- **Architecture:** Sidecar-free using eBPF + ztunnel DaemonSet
+- **Compatibility:** ✅ GKE Autopilot compatible (no GKE Warden issues)
+- **Cost:** $0 (included in GKE compute)
+- **Features:**
+  - ✅ **L4 (Always Active):** mTLS encryption, zero-trust, basic telemetry
+  - 🔄 **L7 (Optional):** Advanced routing, retries, circuit breaking via waypoint proxies
+- **Overhead:** ~15-20% (L4 only), 25-30% (with L7)
+- **Maturity:** Beta (Istio 1.20+)
+- **Status:** Ready to deploy via workflow
+- **📚 Documentation:**
+  - [k8s/istio/ambient-mesh/README.md](k8s/istio/ambient-mesh/README.md) - Implementation guide (310 lines)
+  - [.github/workflows/deploy-istio-ambient.yml](.github/workflows/deploy-istio-ambient.yml) - Automated deployment
+
+#### 💰 Solution 2: Anthos Service Mesh / ASM (Alternative - Paid)
+- **Architecture:** Google-managed Istio with sidecars (works on Autopilot)
+- **Compatibility:** ✅ GKE Autopilot compatible (Google-optimized)
+- **Cost:** ~$4-8/month for dx03 ($0.50 per vCPU/month)
+- **Features:**
+  - ✅ **Fully managed** control plane
+  - ✅ **Enterprise support** with SLA
+  - ✅ **Cloud Operations** integration (native Monitoring/Logging)
+  - ✅ **Multi-cluster mesh** support
+- **Maturity:** GA (Production-ready)
+- **Status:** Available if budget allows
+- **📚 Documentation:**
+  - [k8s/istio/asm/README-ASM.md](k8s/istio/asm/README-ASM.md) - ASM guide (230 lines)
+
+#### 📊 Comprehensive Comparison
+- **📚 Documentation:**
+  - [docs/SERVICE-MESH-COMPARISON.md](docs/SERVICE-MESH-COMPARISON.md) - Complete comparison (360 lines)
+    * 5 solutions evaluated (No Mesh, Sidecar ❌, Ambient ⭐, ASM 💰, GKE Standard)
+    * Decision matrix: Ambient Mesh scores 9.4/10
+    * Cost analysis, feature comparison, implementation roadmap
+  - [docs/GKE-WARDEN-ISSUE.md](docs/GKE-WARDEN-ISSUE.md) - Root cause analysis (180 lines)
+  - [k8s/istio/README.md](k8s/istio/README.md) - Original Istio setup (463 lines)
+
+#### 🎯 Recommendation
+**Deploy Istio Ambient Mesh** - Best balance of cost ($0), features (mTLS + telemetry), and compatibility (GKE Autopilot ✅)
+
+### 📚 Code Quality - SonarCloud
 - **Status:** 🟢 **MONITORADO**
 - **Plataforma:** SonarCloud
 - **Projetos Analisados:**
