@@ -1,4 +1,4 @@
-name: Troubleshoot Pods
+name: 🔍 Troubleshoot Pods
 
 on:
   workflow_dispatch:

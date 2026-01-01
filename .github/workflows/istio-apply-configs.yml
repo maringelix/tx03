@@ -1,4 +1,4 @@
-name: "Apply Istio Configurations"
+name: "🔧 Apply Istio Configurations"
 
 on:
   workflow_dispatch:

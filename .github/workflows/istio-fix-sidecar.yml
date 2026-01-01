@@ -1,4 +1,4 @@
-name: Fix Istio Sidecar Injection
+name: 🔍 Fix Istio Sidecar Injection
 
 on:
   workflow_dispatch:

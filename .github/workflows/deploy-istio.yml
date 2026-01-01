@@ -1,4 +1,4 @@
-name: Deploy Istio Service Mesh
+name: 🔧 Deploy Istio Service Mesh
 
 on:
   workflow_dispatch:

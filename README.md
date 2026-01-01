@@ -93,8 +93,8 @@ Este repositório contém a infraestrutura do **tx03**, o terceiro projeto da s�
 - **Retenção:** 7 dias (Prometheus) + PVC persistente (Grafana 5Gi)
 - **📚 Documentação Completa:** [OBSERVABILITY.md](OBSERVABILITY.md) | [k8s/observability/README.md](k8s/observability/README.md)
 
-### 🕸️ Service Mesh (Istio) - EM IMPLEMENTAÇÃO
-- **Status:** 🟡 **INSTALAÇÃO BASE COMPLETA**
+### 🕸️ Service Mesh (Istio) - INFRAESTRUTURA INSTALADA
+- **Status:** 🟡 **BASE INSTALADA - SIDECAR INJECTION DESABILITADO**
 - **Versão:** Istio 1.20.1
 - **Profile:** default
 - **Componentes Instalados:**
@@ -104,16 +104,21 @@ Este repositório contém a infraestrutura do **tx03**, o terceiro projeto da s�
   - ✅ **Jaeger:** Distributed tracing
   - ✅ **Prometheus:** Métricas do service mesh (integrado)
   - ✅ **Grafana:** Dashboards do Istio
-- **Namespace:** `istio-system` (control plane) + `dx03-dev` (data plane - injection habilitado)
-- **Configurações:**
-  - 🔄 **mTLS Mode:** PERMISSIVE (migração gradual)
-  - 🔄 **Gateway:** dx03.ddns.net (HTTP/HTTPS routing)
-  - 🔄 **VirtualService:** Roteamento para backend (/api) e frontend (/)
-  - 🔄 **DestinationRules:** Circuit breaking + load balancing
-  - 🔄 **Telemetry:** Access logs + Jaeger tracing (100% sampling)
-- **Sidecar Injection:** Label `istio-injection=enabled` configurado
-- **Status dos Pods:** Aguardando restart para injeção de sidecars (2/2 containers)
-- **📚 Documentação:** [k8s/istio/README.md](k8s/istio/README.md) (463 linhas)
+- **Namespace:** `istio-system` (control plane) + `dx03-dev` (data plane)
+- **Configurações Aplicadas:**
+  - ✅ **mTLS Mode:** PERMISSIVE (configurado mas não ativo)
+  - ✅ **Gateway:** dx03.ddns.net (HTTP/HTTPS routing)
+  - ✅ **VirtualService:** Roteamento para backend (/api) e frontend (/)
+  - ✅ **DestinationRules:** Circuit breaking + load balancing
+  - ✅ **Telemetry:** Access logs + Jaeger tracing (100% sampling)
+- **⚠️ GKE Autopilot Limitation:** 
+  - **Sidecar Injection:** ❌ Desabilitado (incompatível com GKE Autopilot)
+  - **Motivo:** GKE Warden bloqueia Istio proxy sidecars por violação de políticas de segurança
+  - **Status dos Pods:** 1/1 containers (sem `istio-proxy` sidecar)
+  - **Alternativas:** Istio Ambient Mesh (eBPF) ou ASM (Anthos Service Mesh)
+- **📚 Documentação:** 
+  - [k8s/istio/README.md](k8s/istio/README.md) - Guia de instalação (463 linhas)
+  - [docs/GKE-WARDEN-ISSUE.md](docs/GKE-WARDEN-ISSUE.md) - Issue crítico e soluções (180 linhas)
 
 ### � Code Quality - SonarCloud
 - **Status:** 🟢 **MONITORADO**
@@ -143,10 +148,17 @@ Este repositório contém a infraestrutura do **tx03**, o terceiro projeto da s�
   - Config Audit Reports (security best practices)
   - RBAC Assessment (permissions review)
   - Infrastructure Assessment (cluster security)
+- **⚠️ GKE Autopilot Compatibility:** 
+  - **Trivy Operator:** ✅ Configurado com webhook rules explícitos (sem wildcards)
+  - **OPA Gatekeeper:** ✅ Deployed manualmente (Helm chart tem limitações)
+  - **Issues Resolvidos:** Wildcard webhook rules bloqueadas por Admission Controller
 - **Retenção:** 24h (scan reports)
 - **Severidades:** CRITICAL, HIGH, MEDIUM
 - **Notificações:** Slack integrado
-- **📚 Documentação Completa:** [k8s/security/README.md](k8s/security/README.md) | [SECURITY.md](SECURITY.md)
+- **📚 Documentação Completa:** 
+  - [k8s/security/README.md](k8s/security/README.md) - Guia completo de segurança
+  - [SECURITY.md](SECURITY.md) - Políticas e best practices
+  - [docs/TRIVY-GKE-AUTOPILOT-FIX.md](docs/TRIVY-GKE-AUTOPILOT-FIX.md) - Fix de compatibilidade GKE (129 linhas)
 
 ### 📊 Estatísticas Finais
 ```
