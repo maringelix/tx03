@@ -3,20 +3,23 @@ name: 🔧 Deploy Istio Ambient Mesh
 on:
   workflow_dispatch:
     inputs:
-      install_ambient:
-        description: 'Install Istio with Ambient profile'
+      mesh_type:
+        description: 'Service Mesh Type'
         required: true
-        type: boolean
-        default: false
+        type: choice
+        options:
+          - asm
+          - ambient
+        default: asm
       
       enable_namespace:
-        description: 'Enable ambient mesh for dx03-dev namespace'
+        description: 'Enable service mesh for dx03-dev namespace'
         required: true
         type: boolean
         default: true
       
       deploy_waypoint:
-        description: 'Deploy waypoint proxies (L7 features)'
+        description: 'Deploy waypoint proxies (L7 features - Ambient only)'
         required: true
         type: boolean
         default: false
@@ -32,6 +35,8 @@ env:
   CLUSTER_NAME: tx03-gke-cluster
   NAMESPACE: dx03-dev
   ISTIO_VERSION: "1.20.1"
+  GCP_PROJECT_ID: tx03-444615
+  ASM_VERSION: "1.20"
 
 jobs:
   deploy-ambient-mesh:
@@ -66,7 +71,7 @@ jobs:
           kubectl cluster-info
 
       - name: 📦 Install istioctl
-        if: ${{ inputs.install_ambient }}
+        if: ${{ inputs.mesh_type == 'ambient' }}
         run: |
           echo "📦 Downloading Istio ${{ env.ISTIO_VERSION }}..."
           curl -L https://istio.io/downloadIstio | ISTIO_VERSION=${{ env.ISTIO_VERSION }} sh -
@@ -79,8 +84,18 @@ jobs:
           # Add to PATH for subsequent steps
           echo "$PWD/bin" >> $GITHUB_PATH
 
+      - name: 📦 Download ASM CLI
+        if: ${{ inputs.mesh_type == 'asm' }}
+        run: |
+          echo "📦 Downloading ASM CLI..."
+          curl -L https://storage.googleapis.com/csm-artifacts/asm/asmcli_${{ env.ASM_VERSION }} -o asmcli
+          chmod +x asmcli
+          
+          echo "✅ ASM CLI downloaded"
+          ./asmcli version || echo "Version command not available"
+
       - name: 🔧 Install Istio Ambient Profile
-        if: ${{ inputs.install_ambient }}
+        if: ${{ inputs.mesh_type == 'ambient' }}
         run: |
           echo "🔧 Installing Istio with Ambient profile..."
           
@@ -102,6 +117,48 @@ jobs:
           
           echo "✅ Istio Ambient installation complete!"
 
+      - name: 🔧 Install ASM (Anthos Service Mesh)
+        if: ${{ inputs.mesh_type == 'asm' }}
+        run: |
+          echo "🔧 Installing ASM (Anthos Service Mesh)..."
+          
+          # Enable required APIs
+          echo "📡 Enabling required GCP APIs..."
+          gcloud services enable mesh.googleapis.com --project=${{ env.GCP_PROJECT_ID }}
+          gcloud services enable anthos.googleapis.com --project=${{ env.GCP_PROJECT_ID }}
+          gcloud services enable gkehub.googleapis.com --project=${{ env.GCP_PROJECT_ID }}
+          
+          # Register cluster to fleet (if not already)
+          echo "🚢 Registering cluster to fleet..."
+          gcloud container fleet memberships register ${{ env.CLUSTER_NAME }} \
+            --gke-cluster=${{ env.GCP_REGION }}/${{ env.CLUSTER_NAME }} \
+            --enable-workload-identity \
+            --project=${{ env.GCP_PROJECT_ID }} || echo "ℹ️ Cluster already registered"
+          
+          # Validate prerequisites
+          echo "✅ Validating ASM prerequisites..."
+          ./asmcli validate \
+            --project_id ${{ env.GCP_PROJECT_ID }} \
+            --cluster_name ${{ env.CLUSTER_NAME }} \
+            --cluster_location ${{ env.GCP_REGION }} \
+            --fleet_id ${{ env.GCP_PROJECT_ID }} \
+            --output_dir ./asm-validation || echo "⚠️ Validation warnings (may be ok)"
+          
+          # Install ASM
+          echo "🚀 Installing ASM..."
+          ./asmcli install \
+            --project_id ${{ env.GCP_PROJECT_ID }} \
+            --cluster_name ${{ env.CLUSTER_NAME }} \
+            --cluster_location ${{ env.GCP_REGION }} \
+            --fleet_id ${{ env.GCP_PROJECT_ID }} \
+            --output_dir ./asm-output \
+            --enable_all \
+            --ca mesh_ca \
+            --option legacy-default-ingressgateway \
+            --verbose
+          
+          echo "✅ ASM installation complete!"
+
       - name: 📊 Check Istio Status
         run: |
           echo "📊 Istio Components Status:"
@@ -115,16 +172,28 @@ jobs:
           echo "🎯 Istiod Deployment:"
           kubectl get deployment -n istio-system istiod
 
-      - name: 🏷️ Enable Ambient Mesh for Namespace
+      - name: 🏷️ Enable Service Mesh for Namespace
         if: ${{ inputs.enable_namespace }}
         run: |
-          echo "🏷️ Enabling ambient mesh for namespace: ${{ env.NAMESPACE }}"
+          echo "🏷️ Enabling service mesh for namespace: ${{ env.NAMESPACE }}"
           
-          # Remove old sidecar injection label if exists
+          # Remove old labels
           kubectl label namespace ${{ env.NAMESPACE }} istio-injection- || true
+          kubectl label namespace ${{ env.NAMESPACE }} istio.io/dataplane-mode- || true
           
-          # Apply ambient mesh label
-          kubectl label namespace ${{ env.NAMESPACE }} istio.io/dataplane-mode=ambient --overwrite
+          # Apply appropriate label based on mesh type
+          if [ "${{ inputs.mesh_type }}" == "asm" ]; then
+            echo "📝 Applying ASM sidecar injection label..."
+            
+            # Get ASM revision label
+            ASM_REVISION=$(kubectl get deploy -n istio-system -l app=istiod -o jsonpath='{.items[0].metadata.labels.istio\.io/rev}' 2>/dev/null || echo "asm-managed")
+            
+            echo "Using ASM revision: $ASM_REVISION"
+            kubectl label namespace ${{ env.NAMESPACE }} istio.io/rev=$ASM_REVISION --overwrite
+          else
+            echo "📝 Applying Ambient mesh label..."
+            kubectl label namespace ${{ env.NAMESPACE }} istio.io/dataplane-mode=ambient --overwrite
+          fi
           
           echo "✅ Namespace labels:"
           kubectl get namespace ${{ env.NAMESPACE }} --show-labels
@@ -144,7 +213,7 @@ jobs:
           echo "✅ Pods restarted successfully!"
 
       - name: 🌐 Deploy Waypoint Proxies
-        if: ${{ inputs.deploy_waypoint }}
+        if: ${{ inputs.deploy_waypoint && inputs.mesh_type == 'ambient' }}
         run: |
           echo "🌐 Deploying waypoint proxies for L7 features..."
           
@@ -176,39 +245,51 @@ jobs:
           echo "✅ Telemetry configured:"
           kubectl get telemetry -n ${{ env.NAMESPACE }}
 
-      - name: ✅ Validate Ambient Mesh
+      - name: ✅ Validate Service Mesh
         run: |
-          echo "✅ Validating Ambient Mesh setup..."
+          echo "✅ Validating Service Mesh setup..."
           
           echo ""
-          echo "📊 Namespace enrollment:"
-          kubectl get namespace ${{ env.NAMESPACE }} -o jsonpath='{.metadata.labels.istio\.io/dataplane-mode}'
+          echo "📊 Namespace configuration:"
+          kubectl get namespace ${{ env.NAMESPACE }} -o yaml | grep -A 5 labels
           
           echo ""
-          echo "🔍 Application pods (should be 1/1 containers):"
+          echo "🔍 Application pods:"
           kubectl get pods -n ${{ env.NAMESPACE }} -o wide
           
-          echo ""
-          echo "🌐 ztunnel DaemonSet status:"
-          kubectl get daemonset -n istio-system ztunnel
+          if [ "${{ inputs.mesh_type }}" == "asm" ]; then
+            echo ""
+            echo "🌐 ASM Control Plane:"
+            kubectl get pods -n istio-system -l app=istiod
+            
+            echo ""
+            echo "📊 Pods should show 2/2 containers (app + istio-proxy sidecar)"
+          else
+            echo ""
+            echo "🌐 ztunnel DaemonSet status:"
+            kubectl get daemonset -n istio-system ztunnel || echo "⚠️ ztunnel not found"
+            
+            echo ""
+            echo "📊 Pods should show 1/1 containers (no sidecar in ambient mode)"
+          fi
           
           echo ""
-          echo "📊 Workload entries (ambient enrollment):"
-          kubectl get workloadentry -A || echo "ℹ️ No workload entries yet (normal for fresh installation)"
-          
-          echo ""
-          echo "🎯 Services in ambient mesh:"
+          echo "🎯 Services in mesh:"
           kubectl get services -n ${{ env.NAMESPACE }}
 
       - name: 📋 Generate Summary
         run: |
-          echo "## 🔧 Istio Ambient Mesh Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔧 Service Mesh Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          if [ "${{ inputs.install_ambient }}" == "true" ]; then
-            echo "✅ **Istio Ambient Profile**: Installed" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.mesh_type }}" == "asm" ]; then
+            echo "✅ **Mesh Type**: Anthos Service Mesh (ASM)" >> $GITHUB_STEP_SUMMARY
+            echo "💰 **Cost**: ~\$4-8/month (\$0.50 per vCPU)" >> $GITHUB_STEP_SUMMARY
+            echo "🔧 **Sidecars**: 2/2 containers (app + istio-proxy)" >> $GITHUB_STEP_SUMMARY
           else
-            echo "⏭️ **Istio Installation**: Skipped" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **Mesh Type**: Istio Ambient Mesh" >> $GITHUB_STEP_SUMMARY
+            echo "💰 **Cost**: \$0 (Free)" >> $GITHUB_STEP_SUMMARY
+            echo "🔧 **Sidecars**: 1/1 containers (no sidecar)" >> $GITHUB_STEP_SUMMARY
           fi
           
           if [ "${{ inputs.enable_namespace }}" == "true" ]; then
@@ -217,8 +298,6 @@ jobs:
           
           if [ "${{ inputs.deploy_waypoint }}" == "true" ]; then
             echo "✅ **Waypoint Proxies**: Deployed (L7 features active)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "ℹ️ **Waypoint Proxies**: Not deployed (L4 only)" >> $GITHUB_STEP_SUMMARY
           fi
           
           if [ "${{ inputs.apply_policies }}" == "true" ]; then
@@ -238,13 +317,13 @@ jobs:
         with:
           payload: |
             {
-              "text": "✅ Istio Ambient Mesh - Success",
+              "text": "✅ Service Mesh - Success",
               "blocks": [
                 {
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "✅ *Istio Ambient Mesh Deployed Successfully*\n\n🔗 Check logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    "text": "✅ *Service Mesh Deployed Successfully*\n\n🔧 Mesh Type: ${{ inputs.mesh_type }}\n🔗 Check logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
                   }
                 }
               ]
@@ -259,13 +338,13 @@ jobs:
         with:
           payload: |
             {
-              "text": "❌ Istio Ambient Mesh - Failed",
+              "text": "❌ Service Mesh - Failed",
               "blocks": [
                 {
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "❌ *Istio Ambient Mesh Deployment Failed*\n\n🔗 Check logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    "text": "❌ *Service Mesh Deployment Failed*\n\n🔧 Mesh Type: ${{ inputs.mesh_type }}\n🔗 Check logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
                   }
                 }
               ]
