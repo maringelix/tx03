@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dx03-dev
+  labels:
+    # Enable Istio Ambient Mesh (no sidecars, uses ztunnel + eBPF)
+    istio.io/dataplane-mode: ambient
+    
+    # App labels
+    app: dx03
+    environment: dev
+    
+    # Monitoring labels
+    monitoring: enabled
+    prometheus.io/scrape: "true"

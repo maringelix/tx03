@@ -1,0 +1,72 @@
+---
+# Authorization Policy - Require mTLS for all traffic
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: dx03-mtls-strict
+  namespace: dx03-dev
+spec:
+  mtls:
+    mode: STRICT # Enforce mTLS for all traffic in ambient mesh
+
+---
+# Authorization Policy - Allow frontend to backend
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-frontend-to-backend
+  namespace: dx03-dev
+spec:
+  selector:
+    matchLabels:
+      app: dx03-backend
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/dx03-dev/sa/default"]
+        namespaces: ["dx03-dev"]
+    to:
+    - operation:
+        ports: ["3000"]
+        methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+
+---
+# Authorization Policy - Allow external traffic to frontend
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-external-to-frontend
+  namespace: dx03-dev
+spec:
+  selector:
+    matchLabels:
+      app: dx03-frontend
+  action: ALLOW
+  rules:
+  - from:
+    - source: {}
+    to:
+    - operation:
+        ports: ["8080"]
+        methods: ["GET", "POST", "OPTIONS"]
+
+---
+# Authorization Policy - Deny direct access to backend from external
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: deny-external-to-backend
+  namespace: dx03-dev
+spec:
+  selector:
+    matchLabels:
+      app: dx03-backend
+  action: DENY
+  rules:
+  - from:
+    - source:
+        notNamespaces: ["dx03-dev", "istio-system"]
+    to:
+    - operation:
+        ports: ["3000"]

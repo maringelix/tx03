@@ -1,0 +1,275 @@
+name: 🔧 Deploy Istio Ambient Mesh
+
+on:
+  workflow_dispatch:
+    inputs:
+      install_ambient:
+        description: 'Install Istio with Ambient profile'
+        required: true
+        type: boolean
+        default: false
+      
+      enable_namespace:
+        description: 'Enable ambient mesh for dx03-dev namespace'
+        required: true
+        type: boolean
+        default: true
+      
+      deploy_waypoint:
+        description: 'Deploy waypoint proxies (L7 features)'
+        required: true
+        type: boolean
+        default: false
+      
+      apply_policies:
+        description: 'Apply authorization policies'
+        required: true
+        type: boolean
+        default: true
+
+env:
+  GCP_REGION: us-central1
+  CLUSTER_NAME: tx03-gke-cluster
+  NAMESPACE: dx03-dev
+  ISTIO_VERSION: "1.20.1"
+
+jobs:
+  deploy-ambient-mesh:
+    name: Deploy Istio Ambient Mesh
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: 🔑 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔐 Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          token_format: 'access_token'
+
+      - name: ☁️ Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: 'gke-gcloud-auth-plugin'
+
+      - name: 🔧 Configure kubectl
+        run: |
+          gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} \
+            --region=${{ env.GCP_REGION }}
+          
+          kubectl version --client
+          kubectl cluster-info
+
+      - name: 📦 Install istioctl
+        if: ${{ inputs.install_ambient }}
+        run: |
+          echo "📦 Downloading Istio ${{ env.ISTIO_VERSION }}..."
+          curl -L https://istio.io/downloadIstio | ISTIO_VERSION=${{ env.ISTIO_VERSION }} sh -
+          cd istio-${{ env.ISTIO_VERSION }}
+          export PATH=$PWD/bin:$PATH
+          
+          echo "✅ istioctl version:"
+          istioctl version --remote=false
+          
+          # Add to PATH for subsequent steps
+          echo "$PWD/bin" >> $GITHUB_PATH
+
+      - name: 🔧 Install Istio Ambient Profile
+        if: ${{ inputs.install_ambient }}
+        run: |
+          echo "🔧 Installing Istio with Ambient profile..."
+          
+          istioctl install --set profile=ambient \
+            --set values.global.istioNamespace=istio-system \
+            --set values.global.proxy.privileged=false \
+            --skip-confirmation
+          
+          echo "⏳ Waiting for Istio components..."
+          kubectl wait --for=condition=ready pod \
+            -l app=istiod \
+            -n istio-system \
+            --timeout=300s
+          
+          kubectl wait --for=condition=ready pod \
+            -l app=ztunnel \
+            -n istio-system \
+            --timeout=300s || echo "⚠️ ztunnel pods may still be initializing"
+          
+          echo "✅ Istio Ambient installation complete!"
+
+      - name: 📊 Check Istio Status
+        run: |
+          echo "📊 Istio Components Status:"
+          kubectl get pods -n istio-system
+          
+          echo ""
+          echo "🔍 ztunnel DaemonSet:"
+          kubectl get daemonset -n istio-system ztunnel || echo "⚠️ ztunnel not found (will be created by profile)"
+          
+          echo ""
+          echo "🎯 Istiod Deployment:"
+          kubectl get deployment -n istio-system istiod
+
+      - name: 🏷️ Enable Ambient Mesh for Namespace
+        if: ${{ inputs.enable_namespace }}
+        run: |
+          echo "🏷️ Enabling ambient mesh for namespace: ${{ env.NAMESPACE }}"
+          
+          # Remove old sidecar injection label if exists
+          kubectl label namespace ${{ env.NAMESPACE }} istio-injection- || true
+          
+          # Apply ambient mesh label
+          kubectl label namespace ${{ env.NAMESPACE }} istio.io/dataplane-mode=ambient --overwrite
+          
+          echo "✅ Namespace labels:"
+          kubectl get namespace ${{ env.NAMESPACE }} --show-labels
+
+      - name: 🔄 Restart Application Pods
+        if: ${{ inputs.enable_namespace }}
+        run: |
+          echo "🔄 Restarting application deployments..."
+          
+          kubectl rollout restart deployment/dx03-backend -n ${{ env.NAMESPACE }}
+          kubectl rollout restart deployment/dx03-frontend -n ${{ env.NAMESPACE }}
+          
+          echo "⏳ Waiting for rollout..."
+          kubectl rollout status deployment/dx03-backend -n ${{ env.NAMESPACE }} --timeout=300s
+          kubectl rollout status deployment/dx03-frontend -n ${{ env.NAMESPACE }} --timeout=300s
+          
+          echo "✅ Pods restarted successfully!"
+
+      - name: 🌐 Deploy Waypoint Proxies
+        if: ${{ inputs.deploy_waypoint }}
+        run: |
+          echo "🌐 Deploying waypoint proxies for L7 features..."
+          
+          kubectl apply -f k8s/istio/ambient-mesh/waypoint-proxies.yaml
+          
+          echo "⏳ Waiting for waypoint proxies..."
+          sleep 10
+          
+          echo "📊 Waypoint proxy status:"
+          kubectl get gateway -n ${{ env.NAMESPACE }}
+
+      - name: 🔐 Apply Authorization Policies
+        if: ${{ inputs.apply_policies }}
+        run: |
+          echo "🔐 Applying authorization policies..."
+          
+          kubectl apply -f k8s/istio/ambient-mesh/authorization-policies.yaml
+          
+          echo "✅ Policies applied:"
+          kubectl get peerauthentication,authorizationpolicy -n ${{ env.NAMESPACE }}
+
+      - name: 📈 Apply Telemetry Configuration
+        if: ${{ inputs.apply_policies }}
+        run: |
+          echo "📈 Applying telemetry configuration..."
+          
+          kubectl apply -f k8s/istio/ambient-mesh/telemetry.yaml
+          
+          echo "✅ Telemetry configured:"
+          kubectl get telemetry -n ${{ env.NAMESPACE }}
+
+      - name: ✅ Validate Ambient Mesh
+        run: |
+          echo "✅ Validating Ambient Mesh setup..."
+          
+          echo ""
+          echo "📊 Namespace enrollment:"
+          kubectl get namespace ${{ env.NAMESPACE }} -o jsonpath='{.metadata.labels.istio\.io/dataplane-mode}'
+          
+          echo ""
+          echo "🔍 Application pods (should be 1/1 containers):"
+          kubectl get pods -n ${{ env.NAMESPACE }} -o wide
+          
+          echo ""
+          echo "🌐 ztunnel DaemonSet status:"
+          kubectl get daemonset -n istio-system ztunnel
+          
+          echo ""
+          echo "📊 Workload entries (ambient enrollment):"
+          kubectl get workloadentry -A || echo "ℹ️ No workload entries yet (normal for fresh installation)"
+          
+          echo ""
+          echo "🎯 Services in ambient mesh:"
+          kubectl get services -n ${{ env.NAMESPACE }}
+
+      - name: 📋 Generate Summary
+        run: |
+          echo "## 🔧 Istio Ambient Mesh Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ inputs.install_ambient }}" == "true" ]; then
+            echo "✅ **Istio Ambient Profile**: Installed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⏭️ **Istio Installation**: Skipped" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ inputs.enable_namespace }}" == "true" ]; then
+            echo "✅ **Namespace Enrollment**: Enabled for ${{ env.NAMESPACE }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ inputs.deploy_waypoint }}" == "true" ]; then
+            echo "✅ **Waypoint Proxies**: Deployed (L7 features active)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "ℹ️ **Waypoint Proxies**: Not deployed (L4 only)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ inputs.apply_policies }}" == "true" ]; then
+            echo "✅ **Policies**: Applied (mTLS + AuthZ + Telemetry)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Current Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n ${{ env.NAMESPACE }} >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: 📣 Send Slack notification on success
+        if: success()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": "✅ Istio Ambient Mesh - Success",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "✅ *Istio Ambient Mesh Deployed Successfully*\n\n🔗 Check logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true
+
+      - name: 📣 Send Slack notification on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": "❌ Istio Ambient Mesh - Failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "❌ *Istio Ambient Mesh Deployment Failed*\n\n🔗 Check logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true

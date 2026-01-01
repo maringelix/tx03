@@ -1,0 +1,57 @@
+---
+# Waypoint Proxy Gateway for dx03-dev namespace
+# Provides L7 features (routing, retries, circuit breaking)
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: dx03-waypoint
+  namespace: dx03-dev
+  labels:
+    app: dx03
+    component: waypoint-proxy
+spec:
+  gatewayClassName: istio-waypoint
+  listeners:
+  - name: mesh
+    port: 15008
+    protocol: HBONE # HTTP-Based Overlay Network Environment
+
+---
+# Backend Waypoint Proxy (optional - for advanced L7 features)
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: dx03-backend-waypoint
+  namespace: dx03-dev
+  labels:
+    app: dx03
+    component: waypoint-proxy
+    service: backend
+  annotations:
+    istio.io/service-account: dx03-backend
+spec:
+  gatewayClassName: istio-waypoint
+  listeners:
+  - name: mesh
+    port: 15008
+    protocol: HBONE
+
+---
+# Frontend Waypoint Proxy (optional - for advanced L7 features)
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: dx03-frontend-waypoint
+  namespace: dx03-dev
+  labels:
+    app: dx03
+    component: waypoint-proxy
+    service: frontend
+  annotations:
+    istio.io/service-account: dx03-frontend
+spec:
+  gatewayClassName: istio-waypoint
+  listeners:
+  - name: mesh
+    port: 15008
+    protocol: HBONE

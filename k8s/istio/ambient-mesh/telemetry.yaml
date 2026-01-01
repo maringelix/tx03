@@ -1,0 +1,59 @@
+---
+# Telemetry Configuration for Ambient Mesh
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: dx03-ambient-telemetry
+  namespace: dx03-dev
+spec:
+  # Access logging
+  accessLogging:
+    - providers:
+        - name: envoy
+      filter:
+        expression: response.code >= 400
+  
+  # Metrics
+  metrics:
+    - providers:
+        - name: prometheus
+      overrides:
+        - match:
+            metric: ALL_METRICS
+          tagOverrides:
+            source_cluster:
+              value: dx03-dev
+            destination_cluster:
+              value: dx03-dev
+  
+  # Tracing (via Jaeger)
+  tracing:
+    - providers:
+        - name: jaeger
+      randomSamplingPercentage: 10.0 # 10% sampling for ambient mesh
+      customTags:
+        environment:
+          literal:
+            value: dev
+        app:
+          literal:
+            value: dx03
+        mesh_mode:
+          literal:
+            value: ambient
+
+---
+# Jaeger Tracing Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: istio-ambient-tracing
+  namespace: istio-system
+data:
+  mesh: |
+    defaultConfig:
+      tracing:
+        zipkin:
+          address: jaeger-collector.istio-system.svc.cluster.local:9411
+        sampling: 10.0
+    enableTracing: true
