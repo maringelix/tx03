@@ -153,6 +153,18 @@ jobs:
           echo "======================================================================"
           echo ""
           
+          echo "=== Deployments Status ==="
+          kubectl get deployments -n dx03-dev
+          echo ""
+          
+          echo "=== ReplicaSets Status ==="
+          kubectl get replicasets -n dx03-dev
+          echo ""
+          
+          echo "=== Recent Events (last 20) ==="
+          kubectl get events -n dx03-dev --sort-by='.lastTimestamp' | tail -20
+          echo ""
+          
           echo "=== Istio System Pods ==="
           kubectl get pods -n istio-system
           echo ""
