@@ -93,50 +93,46 @@ Este repositório contém a infraestrutura do **tx03**, o terceiro projeto da s�
 - **Retenção:** 7 dias (Prometheus) + PVC persistente (Grafana 5Gi)
 - **📚 Documentação Completa:** [OBSERVABILITY.md](OBSERVABILITY.md) | [k8s/observability/README.md](k8s/observability/README.md)
 
-### 🕸️ Service Mesh Solutions - READY TO DEPLOY
-- **Status:** 🟢 **SOLUÇÕES ALTERNATIVAS IMPLEMENTADAS**
-- **Current State:** App running without service mesh (1/1 containers)
-- **Problem:** GKE Autopilot Warden blocks standard Istio sidecar injection
+###  🕸️ Service Mesh - NOT VIABLE ON GKE AUTOPILOT
+- **Status:** ❌ **ALL SOLUTIONS BLOCKED**
+- **Current State:** App running without service mesh (1/1 containers per pod)
 
-#### ⭐ Solution 1: Istio Ambient Mesh (RECOMMENDED - Free)
-- **Architecture:** Sidecar-free using eBPF + ztunnel DaemonSet
-- **Compatibility:** ✅ GKE Autopilot compatible (no GKE Warden issues)
-- **Cost:** $0 (included in GKE compute)
-- **Features:**
-  - ✅ **L4 (Always Active):** mTLS encryption, zero-trust, basic telemetry
-  - 🔄 **L7 (Optional):** Advanced routing, retries, circuit breaking via waypoint proxies
-- **Overhead:** ~15-20% (L4 only), 25-30% (with L7)
-- **Maturity:** Beta (Istio 1.20+)
-- **Status:** Ready to deploy via workflow
-- **📚 Documentation:**
-  - [k8s/istio/ambient-mesh/README.md](k8s/istio/ambient-mesh/README.md) - Implementation guide (310 lines)
-  - [.github/workflows/deploy-istio-ambient.yml](.github/workflows/deploy-istio-ambient.yml) - Automated deployment
+#### 🔒 GKE Autopilot Limitations
+**All service mesh architectures are blocked by GKE Autopilot security policies:**
 
-#### 💰 Solution 2: Anthos Service Mesh / ASM (Alternative - Paid)
-- **Architecture:** Google-managed Istio with sidecars (works on Autopilot)
-- **Compatibility:** ✅ GKE Autopilot compatible (Google-optimized)
-- **Cost:** ~$4-8/month for dx03 ($0.50 per vCPU/month)
-- **Features:**
-  - ✅ **Fully managed** control plane
-  - ✅ **Enterprise support** with SLA
-  - ✅ **Cloud Operations** integration (native Monitoring/Logging)
-  - ✅ **Multi-cluster mesh** support
-- **Maturity:** GA (Production-ready)
-- **Status:** Available if budget allows
-- **📚 Documentation:**
-  - [k8s/istio/asm/README-ASM.md](k8s/istio/asm/README-ASM.md) - ASM guide (230 lines)
+1. **❌ Istio Sidecar Injection** - Blocked by GKE Warden
+   - Error: `istio-proxy` security context violates Autopilot policies
+   - Documentation: [GKE-WARDEN-ISSUE.md](docs/GKE-WARDEN-ISSUE.md)
 
-#### 📊 Comprehensive Comparison
-- **📚 Documentation:**
-  - [docs/SERVICE-MESH-COMPARISON.md](docs/SERVICE-MESH-COMPARISON.md) - Complete comparison (360 lines)
-    * 5 solutions evaluated (No Mesh, Sidecar ❌, Ambient ⭐, ASM 💰, GKE Standard)
-    * Decision matrix: Ambient Mesh scores 9.4/10
-    * Cost analysis, feature comparison, implementation roadmap
-  - [docs/GKE-WARDEN-ISSUE.md](docs/GKE-WARDEN-ISSUE.md) - Root cause analysis (180 lines)
-  - [k8s/istio/README.md](k8s/istio/README.md) - Original Istio setup (463 lines)
+2. **❌ Istio Ambient Mesh** - Blocked by GKE Warden
+   - Error: ztunnel requires `NET_ADMIN` capability (not allowed)
+   - Capability restrictions: Autopilot only allows limited set
 
-#### 🎯 Recommendation
-**Deploy Istio Ambient Mesh** - Best balance of cost ($0), features (mTLS + telemetry), and compatibility (GKE Autopilot ✅)
+3. **❌ Anthos Service Mesh (ASM)** - Blocked by IAM Permissions
+   - Error: Service account cannot register cluster to Fleet
+   - Missing permissions: `gkehub.memberships.create`, Fleet API access
+   - Cost: ~$4-8/month (even if permissions were granted)
+
+#### ✅ Current Solution: No Service Mesh
+- **Status:** 🟢 App fully operational
+- **Pods:** 2/2 backend + 2/2 frontend (all 1/1 containers)
+- **Security:** Cloud Armor WAF protecting endpoints
+- **Observability:** Prometheus + Grafana + Alertmanager monitoring
+- **Cost:** $0 for mesh (only GKE Autopilot compute)
+
+#### 📚 Documentation
+- **Complete Analysis:** [SERVICE-MESH-COMPARISON.md](docs/SERVICE-MESH-COMPARISON.md) (360 lines)
+- **Implementation Attempts:** [SERVICE-MESH-IMPLEMENTATION-SUMMARY.md](docs/SERVICE-MESH-IMPLEMENTATION-SUMMARY.md) (400+ lines)
+- **GKE Warden Issue:** [GKE-WARDEN-ISSUE.md](docs/GKE-WARDEN-ISSUE.md) (180 lines)
+- **Ambient Mesh Guide:** [k8s/istio/ambient-mesh/README.md](k8s/istio/ambient-mesh/README.md) (310 lines)
+- **ASM Guide:** [k8s/istio/asm/README-ASM.md](k8s/istio/asm/README-ASM.md) (230 lines)
+
+#### 🎯 Conclusion
+**GKE Autopilot is incompatible with service mesh architectures.** To use service mesh, would need to:
+- Migrate to **GKE Standard** (full control, higher cost, more complexity)
+- Request additional **IAM permissions** for ASM (may not be approved)
+
+**Recommendation:** Continue with native GKE features (current state is production-ready).
 
 ### 📚 Code Quality - SonarCloud
 - **Status:** 🟢 **MONITORADO**
