@@ -8,8 +8,8 @@ permissions:
   id-token: write
 
 env:
-  GCP_REGION: us-central1
-  CLUSTER_NAME: tx03-dev-cluster
+  GCP_REGION: us-east1
+  CLUSTER_NAME: tx03-gke-cluster
   NAMESPACE: dx03-dev
 
 jobs:
