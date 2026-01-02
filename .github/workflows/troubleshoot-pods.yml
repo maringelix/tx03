@@ -8,8 +8,8 @@ permissions:
   id-token: write
 
 env:
-  GCP_PROJECT_ID: project-28e61e96-b6ac-4249-a21f
-  GCP_REGION: us-central1
+  GCP_PROJECT_ID: tx03-444615
+  GCP_REGION: us-east1
   CLUSTER_NAME: tx03-gke-cluster
 
 jobs:
