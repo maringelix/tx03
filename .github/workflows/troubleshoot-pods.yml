@@ -74,6 +74,93 @@ jobs:
             echo "⚠️ No pods found!"
           fi
 
+      - name: 🧹 Detect CrashLooping Pods
+        id: detect_crashes
+        run: |
+          echo ""
+          echo "======================================"
+          echo "🔍 DETECTING CRASHLOOPING PODS"
+          echo "======================================"
+          echo ""
+          
+          # Find pods in CrashLoopBackOff or Init:CrashLoopBackOff
+          CRASHING_PODS=$(kubectl get pods -n dx03-dev --field-selector=status.phase!=Succeeded,status.phase!=Running -o json | \
+            jq -r '.items[] | select(.status.containerStatuses // .status.initContainerStatuses | any(.restartCount > 5)) | .metadata.name')
+          
+          if [ -z "$CRASHING_PODS" ]; then
+            echo "✅ No crashlooping pods found"
+            echo "has_crashes=false" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Found crashlooping pods:"
+            echo "$CRASHING_PODS"
+            echo ""
+            echo "has_crashes=true" >> $GITHUB_OUTPUT
+            echo "crash_pods<<EOF" >> $GITHUB_OUTPUT
+            echo "$CRASHING_PODS" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            
+            # Show details
+            echo ""
+            echo "Pod details:"
+            for pod in $CRASHING_PODS; do
+              echo ""
+              echo "--- Pod: $pod ---"
+              kubectl get pod $pod -n dx03-dev -o json | jq -r '.status | {phase, reason, message, containerStatuses, initContainerStatuses}'
+              echo ""
+              echo "Recent logs:"
+              kubectl logs $pod -n dx03-dev --tail=20 --all-containers=true || echo "Failed to get logs"
+            done
+          fi
+
+      - name: 🧹 Cleanup Old ReplicaSets
+        if: steps.detect_crashes.outputs.has_crashes == 'true'
+        run: |
+          echo ""
+          echo "======================================"
+          echo "🧹 CLEANING UP OLD REPLICASETS"
+          echo "======================================"
+          echo ""
+          
+          # Get all replicasets with 0 desired pods
+          echo "Finding old replicasets..."
+          kubectl get replicasets -n dx03-dev -o json | \
+            jq -r '.items[] | select(.spec.replicas == 0) | .metadata.name' | \
+            while read rs; do
+              echo "Deleting old replicaset: $rs"
+              kubectl delete replicaset $rs -n dx03-dev --ignore-not-found=true
+            done
+          
+          echo ""
+          echo "Remaining replicasets:"
+          kubectl get replicasets -n dx03-dev
+
+      - name: 🧹 Cleanup Trivy Scan Jobs
+        run: |
+          echo ""
+          echo "======================================"
+          echo "🧹 CLEANING UP TRIVY SCAN JOBS"
+          echo "======================================"
+          echo ""
+          
+          # Get failed and completed Trivy scan jobs
+          echo "Checking Trivy scan pods..."
+          kubectl get pods -n trivy-system
+          echo ""
+          
+          # Delete completed jobs (older than 1 hour)
+          echo "Deleting old completed/failed scan jobs..."
+          kubectl delete pods -n trivy-system \
+            --field-selector=status.phase=Succeeded \
+            --ignore-not-found=true || echo "No completed jobs to delete"
+          
+          kubectl delete pods -n trivy-system \
+            --field-selector=status.phase=Failed \
+            --ignore-not-found=true || echo "No failed jobs to delete"
+          
+          echo ""
+          echo "Remaining Trivy pods:"
+          kubectl get pods -n trivy-system
+
       - name: 🔍 Check Events
         run: |
           echo ""
@@ -122,16 +209,55 @@ jobs:
           
           DEPLOYMENTS=$(kubectl get deployments -n dx03-dev -o json | jq '.items | length')
           PODS=$(kubectl get pods -n dx03-dev -o json | jq '.items | length')
+          RUNNING_PODS=$(kubectl get pods -n dx03-dev --field-selector=status.phase=Running -o json | jq '.items | length')
+          CRASHING_PODS=$(kubectl get pods -n dx03-dev --field-selector=status.phase!=Succeeded,status.phase!=Running -o json | \
+            jq '.items[] | select(.status.containerStatuses // .status.initContainerStatuses | any(.restartCount > 5))' | jq -s 'length')
           
           echo "Deployments: $DEPLOYMENTS"
-          echo "Pods: $PODS"
+          echo "Total Pods: $PODS"
+          echo "Running Pods: $RUNNING_PODS"
+          echo "Crashing Pods: $CRASHING_PODS"
           echo ""
           
-          if [ "$PODS" -eq 0 ] && [ "$DEPLOYMENTS" -gt 0 ]; then
-            echo "❌ ISSUE: Deployments exist but no pods!"
+          if [ "$CRASHING_PODS" -gt 0 ]; then
+            echo "🧹 Cleaned up $CRASHING_PODS crashlooping pod(s)"
+            echo "✅ Old replicasets removed"
+          fi
+          
+          if [ "$RUNNING_PODS" -eq 0 ] && [ "$DEPLOYMENTS" -gt 0 ]; then
+            echo "❌ ISSUE: Deployments exist but no running pods!"
             echo "Check events and deployment descriptions above for root cause"
-          elif [ "$PODS" -gt 0 ]; then
-            echo "✅ Pods found! Check their status above"
+          elif [ "$RUNNING_PODS" -gt 0 ]; then
+            echo "✅ $RUNNING_PODS pod(s) running successfully"
           else
             echo "⚠️ No deployments or pods found - may have been deleted"
+          fi
+          
+          echo ""
+          echo "Final cluster state:"
+          kubectl get all -n dx03-dev
+          
+      - name: 📊 Verify Cleanup Success
+        run: |
+          echo ""
+          echo "======================================"
+          echo "✅ VERIFICATION"
+          echo "======================================"
+          echo ""
+          
+          # Wait a bit for cleanup to complete
+          sleep 10
+          
+          echo "Current pod status:"
+          kubectl get pods -n dx03-dev
+          echo ""
+          
+          CRASHING=$(kubectl get pods -n dx03-dev --field-selector=status.phase!=Succeeded,status.phase!=Running -o json | \
+            jq '.items[] | select(.status.containerStatuses // .status.initContainerStatuses | any(.restartCount > 5))' | jq -s 'length')
+          
+          if [ "$CRASHING" -eq 0 ]; then
+            echo "✅ SUCCESS: No crashlooping pods remaining"
+          else
+            echo "⚠️ WARNING: Still $CRASHING crashlooping pod(s) detected"
+            echo "These may be new issues that require investigation"
           fi
