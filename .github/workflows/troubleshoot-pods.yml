@@ -83,9 +83,12 @@ jobs:
           echo "======================================"
           echo ""
           
-          # Find pods in CrashLoopBackOff or Init:CrashLoopBackOff
-          CRASHING_PODS=$(kubectl get pods -n dx03-dev --field-selector=status.phase!=Succeeded,status.phase!=Running -o json | \
-            jq -r '.items[] | select(.status.containerStatuses // .status.initContainerStatuses | any(.restartCount > 5)) | .metadata.name')
+          # Find ALL pods with high restart counts (including those in Pending phase with Init crashes)
+          CRASHING_PODS=$(kubectl get pods -n dx03-dev -o json | \
+            jq -r '.items[] | select(
+              (.status.initContainerStatuses // [] | any(.restartCount > 5)) or 
+              (.status.containerStatuses // [] | any(.restartCount > 5))
+            ) | .metadata.name')
           
           if [ -z "$CRASHING_PODS" ]; then
             echo "✅ No crashlooping pods found"
@@ -107,8 +110,8 @@ jobs:
               echo "--- Pod: $pod ---"
               kubectl get pod $pod -n dx03-dev -o json | jq -r '.status | {phase, reason, message, containerStatuses, initContainerStatuses}'
               echo ""
-              echo "Recent logs:"
-              kubectl logs $pod -n dx03-dev --tail=20 --all-containers=true || echo "Failed to get logs"
+              echo "Recent logs (init container):"
+              kubectl logs $pod -n dx03-dev --previous --all-containers=true --tail=30 2>/dev/null || kubectl logs $pod -n dx03-dev --all-containers=true --tail=30 || echo "Failed to get logs"
             done
           fi
 
@@ -121,8 +124,17 @@ jobs:
           echo "======================================"
           echo ""
           
+          # Delete crashlooping pods directly
+          echo "Deleting crashlooping pods..."
+          PODS="${{ steps.detect_crashes.outputs.crash_pods }}"
+          for pod in $PODS; do
+            echo "Deleting pod: $pod"
+            kubectl delete pod $pod -n dx03-dev --ignore-not-found=true --grace-period=0 --force
+          done
+          
+          echo ""
+          echo "Deleting old replicasets with 0 replicas..."
           # Get all replicasets with 0 desired pods
-          echo "Finding old replicasets..."
           kubectl get replicasets -n dx03-dev -o json | \
             jq -r '.items[] | select(.spec.replicas == 0) | .metadata.name' | \
             while read rs; do
@@ -245,19 +257,32 @@ jobs:
           echo "======================================"
           echo ""
           
-          # Wait a bit for cleanup to complete
-          sleep 10
+          # Wait a bit for cleanup to complete and pods to restart
+          echo "Waiting 30 seconds for pods to restart..."
+          sleep 30
           
+          echo ""
           echo "Current pod status:"
           kubectl get pods -n dx03-dev
           echo ""
           
-          CRASHING=$(kubectl get pods -n dx03-dev --field-selector=status.phase!=Succeeded,status.phase!=Running -o json | \
-            jq '.items[] | select(.status.containerStatuses // .status.initContainerStatuses | any(.restartCount > 5))' | jq -s 'length')
+          CRASHING=$(kubectl get pods -n dx03-dev -o json | \
+            jq '.items[] | select(
+              (.status.initContainerStatuses // [] | any(.restartCount > 5)) or 
+              (.status.containerStatuses // [] | any(.restartCount > 5))
+            )' | jq -s 'length')
           
           if [ "$CRASHING" -eq 0 ]; then
             echo "✅ SUCCESS: No crashlooping pods remaining"
+            echo ""
+            echo "All pods are healthy!"
           else
             echo "⚠️ WARNING: Still $CRASHING crashlooping pod(s) detected"
-            echo "These may be new issues that require investigation"
+            echo "Pods may still be restarting or there's a deeper issue."
+            echo ""
+            echo "Checking restart counts..."
+            kubectl get pods -n dx03-dev -o json | jq -r '.items[] | select(
+              (.status.initContainerStatuses // [] | any(.restartCount > 0)) or 
+              (.status.containerStatuses // [] | any(.restartCount > 0))
+            ) | "\(.metadata.name): \(.status.initContainerStatuses[0].restartCount // 0) init restarts, \(.status.containerStatuses[0].restartCount // 0) container restarts"'
           fi
