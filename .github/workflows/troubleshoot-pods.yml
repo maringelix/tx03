@@ -8,9 +8,9 @@ permissions:
   id-token: write
 
 env:
-  GCP_PROJECT_ID: tx03-444615
-  GCP_REGION: us-east1
-  CLUSTER_NAME: tx03-gke-cluster
+  GCP_REGION: us-central1
+  CLUSTER_NAME: tx03-dev-cluster
+  NAMESPACE: dx03-dev
 
 jobs:
   troubleshoot:
@@ -33,7 +33,7 @@ jobs:
         run: |
           gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} \
             --region ${{ env.GCP_REGION }} \
-            --project ${{ env.GCP_PROJECT_ID }}
+            --project ${{ secrets.GCP_PROJECT_ID }}
 
       - name: 🔍 Check Deployments
         run: |
