@@ -184,19 +184,6 @@ jobs:
           kubectl delete namespace ${{ env.ARGOCD_NAMESPACE }} || true
           echo "✅ ArgoCD uninstalled"
 
-      - name: Notify Slack
-        if: always() && secrets.SLACK_WEBHOOK != ''
-        uses: 8398a7/action-slack@v3
-        with:
-          status: ${{ job.status }}
-          text: |
-            ArgoCD Deployment ${{ job.status }}
-            Action: ${{ github.event.inputs.action || 'install' }}
-            Namespace: ${{ env.ARGOCD_NAMESPACE }}
-            Version: ${{ env.ARGOCD_VERSION }}
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
-
       - name: Generate Summary
         if: github.event.inputs.action != 'uninstall'
         run: |
