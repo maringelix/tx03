@@ -194,7 +194,6 @@ jobs:
             Action: ${{ github.event.inputs.action || 'install' }}
             Namespace: ${{ env.ARGOCD_NAMESPACE }}
             Version: ${{ env.ARGOCD_VERSION }}
-          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
 
