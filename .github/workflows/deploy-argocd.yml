@@ -1,0 +1,233 @@
+name: 🚀 Deploy ArgoCD
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'k8s/argocd/**'
+      - '.github/workflows/deploy-argocd.yml'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - install
+          - upgrade
+          - uninstall
+          - get-password
+        default: 'install'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_REGION: us-central1
+  GKE_CLUSTER: tx03-gke-cluster
+  ARGOCD_VERSION: v2.10.0
+  ARGOCD_NAMESPACE: argocd
+
+jobs:
+  deploy-argocd:
+    name: Deploy ArgoCD
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Setup Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin
+
+      - name: Configure kubectl
+        run: |
+          gcloud container clusters get-credentials ${{ env.GKE_CLUSTER }} \
+            --region=${{ env.GCP_REGION }} \
+            --project ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Create ArgoCD Namespace
+        if: github.event.inputs.action != 'uninstall'
+        run: |
+          if ! kubectl get namespace ${{ env.ARGOCD_NAMESPACE }} &>/dev/null; then
+            echo "📦 Creating ArgoCD namespace..."
+            kubectl create namespace ${{ env.ARGOCD_NAMESPACE }}
+          else
+            echo "✅ ArgoCD namespace already exists"
+          fi
+
+      - name: Install ArgoCD
+        if: github.event.inputs.action == 'install' || github.event.inputs.action == '' || github.event_name == 'push'
+        run: |
+          echo "🚀 Installing ArgoCD ${{ env.ARGOCD_VERSION }}..."
+          
+          # Install ArgoCD
+          kubectl apply -n ${{ env.ARGOCD_NAMESPACE }} -f https://raw.githubusercontent.com/argoproj/argo-cd/${{ env.ARGOCD_VERSION }}/manifests/install.yaml
+          
+          echo "⏳ Waiting for ArgoCD pods to be ready..."
+          kubectl wait --for=condition=Ready pods --all -n ${{ env.ARGOCD_NAMESPACE }} --timeout=300s || true
+          
+          echo "📋 ArgoCD pods status:"
+          kubectl get pods -n ${{ env.ARGOCD_NAMESPACE }}
+
+      - name: Apply Custom Configurations
+        if: github.event.inputs.action != 'uninstall'
+        run: |
+          echo "⚙️  Applying custom configurations..."
+          
+          if [ -d "k8s/argocd" ]; then
+            kubectl apply -f k8s/argocd/ -n ${{ env.ARGOCD_NAMESPACE }} || echo "No custom configs to apply"
+          fi
+
+      - name: Expose ArgoCD Server (LoadBalancer)
+        if: github.event.inputs.action == 'install' || github.event.inputs.action == '' || github.event_name == 'push'
+        run: |
+          echo "🌐 Exposing ArgoCD server via LoadBalancer..."
+          
+          kubectl patch svc argocd-server -n ${{ env.ARGOCD_NAMESPACE }} -p '{"spec": {"type": "LoadBalancer"}}'
+          
+          echo "⏳ Waiting for LoadBalancer IP..."
+          sleep 30
+          
+          EXTERNAL_IP=""
+          for i in {1..10}; do
+            EXTERNAL_IP=$(kubectl get svc argocd-server -n ${{ env.ARGOCD_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            if [ ! -z "$EXTERNAL_IP" ]; then
+              break
+            fi
+            echo "Waiting for IP... ($i/10)"
+            sleep 10
+          done
+          
+          if [ ! -z "$EXTERNAL_IP" ]; then
+            echo "✅ ArgoCD Server IP: $EXTERNAL_IP"
+            echo "ARGOCD_SERVER_IP=$EXTERNAL_IP" >> $GITHUB_ENV
+          else
+            echo "⚠️  LoadBalancer IP not yet assigned"
+          fi
+
+      - name: Get ArgoCD Admin Password
+        if: github.event.inputs.action != 'uninstall'
+        run: |
+          echo "🔑 Getting ArgoCD admin password..."
+          
+          # Wait for secret to be created
+          sleep 10
+          
+          ARGOCD_PASSWORD=$(kubectl get secret argocd-initial-admin-secret -n ${{ env.ARGOCD_NAMESPACE }} -o jsonpath="{.data.password}" | base64 -d)
+          
+          echo "📝 ArgoCD Credentials:"
+          echo "Username: admin"
+          echo "Password: $ARGOCD_PASSWORD"
+          
+          # Save to output (masked)
+          echo "::add-mask::$ARGOCD_PASSWORD"
+          echo "ARGOCD_PASSWORD=$ARGOCD_PASSWORD" >> $GITHUB_ENV
+
+      - name: Install ArgoCD CLI
+        if: github.event.inputs.action != 'uninstall'
+        run: |
+          echo "📥 Installing ArgoCD CLI..."
+          curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/download/${{ env.ARGOCD_VERSION }}/argocd-linux-amd64
+          chmod +x argocd-linux-amd64
+          sudo mv argocd-linux-amd64 /usr/local/bin/argocd
+          argocd version --client
+
+      - name: Verify ArgoCD Installation
+        if: github.event.inputs.action != 'uninstall'
+        run: |
+          echo "🔍 Verifying ArgoCD installation..."
+          
+          echo ""
+          echo "📦 ArgoCD Deployments:"
+          kubectl get deployments -n ${{ env.ARGOCD_NAMESPACE }}
+          
+          echo ""
+          echo "🚀 ArgoCD Pods:"
+          kubectl get pods -n ${{ env.ARGOCD_NAMESPACE }}
+          
+          echo ""
+          echo "🌐 ArgoCD Services:"
+          kubectl get svc -n ${{ env.ARGOCD_NAMESPACE }}
+          
+          echo ""
+          echo "📊 ArgoCD Resources:"
+          kubectl get all -n ${{ env.ARGOCD_NAMESPACE }}
+
+      - name: Upgrade ArgoCD
+        if: github.event.inputs.action == 'upgrade'
+        run: |
+          echo "⬆️  Upgrading ArgoCD to ${{ env.ARGOCD_VERSION }}..."
+          kubectl apply -n ${{ env.ARGOCD_NAMESPACE }} -f https://raw.githubusercontent.com/argoproj/argo-cd/${{ env.ARGOCD_VERSION }}/manifests/install.yaml
+          
+          echo "⏳ Waiting for rollout..."
+          kubectl rollout status deployment/argocd-server -n ${{ env.ARGOCD_NAMESPACE }}
+          kubectl rollout status deployment/argocd-repo-server -n ${{ env.ARGOCD_NAMESPACE }}
+          kubectl rollout status deployment/argocd-applicationset-controller -n ${{ env.ARGOCD_NAMESPACE }}
+
+      - name: Uninstall ArgoCD
+        if: github.event.inputs.action == 'uninstall'
+        run: |
+          echo "🗑️  Uninstalling ArgoCD..."
+          kubectl delete -n ${{ env.ARGOCD_NAMESPACE }} -f https://raw.githubusercontent.com/argoproj/argo-cd/${{ env.ARGOCD_VERSION }}/manifests/install.yaml || true
+          kubectl delete namespace ${{ env.ARGOCD_NAMESPACE }} || true
+          echo "✅ ArgoCD uninstalled"
+
+      - name: Notify Slack
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: |
+            ArgoCD Deployment ${{ job.status }}
+            Action: ${{ github.event.inputs.action || 'install' }}
+            Namespace: ${{ env.ARGOCD_NAMESPACE }}
+            Version: ${{ env.ARGOCD_VERSION }}
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+      - name: Generate Summary
+        if: github.event.inputs.action != 'uninstall'
+        run: |
+          echo "## 🚀 ArgoCD Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ env.ARGOCD_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Namespace:** ${{ env.ARGOCD_NAMESPACE }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Action:** ${{ github.event.inputs.action || 'install' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ ! -z "${{ env.ARGOCD_SERVER_IP }}" ]; then
+            echo "### 🌐 Access Information" >> $GITHUB_STEP_SUMMARY
+            echo "- **URL:** https://${{ env.ARGOCD_SERVER_IP }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Username:** admin" >> $GITHUB_STEP_SUMMARY
+            echo "- **Password:** (check workflow logs or run get-password action)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Quick Commands" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# Get admin password" >> $GITHUB_STEP_SUMMARY
+          echo "kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' | base64 -d" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Port forward to access locally" >> $GITHUB_STEP_SUMMARY
+          echo "kubectl port-forward svc/argocd-server -n argocd 8080:443" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Login with CLI" >> $GITHUB_STEP_SUMMARY
+          echo "argocd login <ARGOCD-SERVER> --username admin --password <PASSWORD>" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📚 Documentation" >> $GITHUB_STEP_SUMMARY
+          echo "- [ArgoCD Official Docs](https://argo-cd.readthedocs.io/)" >> $GITHUB_STEP_SUMMARY
+          echo "- [Getting Started Guide](https://argo-cd.readthedocs.io/en/stable/getting_started/)" >> $GITHUB_STEP_SUMMARY
