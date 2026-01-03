@@ -833,14 +833,29 @@ Ver mais: [COST_OPTIMIZATION.md](docs/COST_OPTIMIZATION.md)
 
 ## 📚 Documentação
 
-### Guias
+### Guias Principais
 
-- [Arquitetura Detalhada](ARCHITECTURE.md) ✅ **Leitura obrigatória**
+- **[Arquitetura Detalhada](ARCHITECTURE.md)** ✅ Leitura obrigatória
+- **[Observabilidade](OBSERVABILITY.md)** 📊 Prometheus + Grafana + Alertmanager (500+ linhas)
+- **[Segurança](SECURITY.md)** 🔒 OPA Gatekeeper + Trivy + SonarCloud (1000+ linhas)
+- **[ArgoCD GitOps](ARGOCD.md)** 🚀 Continuous Delivery GitOps (900+ linhas)
+- **[Backup & Restore](docs/BACKUP-RESTORE.md)** 💾 Cloud SQL + Kubernetes (500+ linhas)
+- **[Guia de Referência](REFERENCE.md)** 📖 Quick reference com todos os comandos (900+ linhas)
+
+### Setup & Deployment
+
 - [Setup Workload Identity](docs/WORKLOAD_IDENTITY_SETUP.md) 🔥 **Passo-a-passo completo**
 - [Guia de Deploy](docs/DEPLOYMENT_GUIDE.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Práticas de Segurança](docs/SECURITY.md)
 - [Otimização de Custos](docs/COST_OPTIMIZATION.md)
+
+### Stack Específico
+
+- [Observability Stack](k8s/observability/README.md) - Configurações Prometheus/Grafana
+- [Security Stack](k8s/security/README.md) - Policies OPA Gatekeeper
+- [Service Mesh](k8s/istio/README.md) - Istio configuration (463 linhas)
+- [ArgoCD](k8s/argocd/README.md) - GitOps setup
 
 ### Links Úteis
 
@@ -964,6 +979,20 @@ Ver mais: [COST_OPTIMIZATION.md](docs/COST_OPTIMIZATION.md)
 - [x] **✅ RPO**: < 24 horas (Recovery Point Objective)
 - [x] **✅ RTO**: < 30 minutos (Recovery Time Objective)
 
+#### Fase 13: ArgoCD GitOps (Concluída ✅)
+- [x] **✅ ArgoCD Installation**: v2.10.0 instalado no cluster GKE
+- [x] **✅ Workflow**: deploy-argocd.yml com actions (install, upgrade, uninstall, get-password)
+- [x] **✅ ConfigMaps**: Configurações customizadas (argocd-cm, argocd-rbac-cm, argocd-cmd-params-cm)
+- [x] **✅ RBAC Policies**: Roles admin, developer, readonly configurados
+- [x] **✅ LoadBalancer**: ArgoCD server exposto via LoadBalancer para acesso externo
+- [x] **✅ Application dx03**: Sincronização automática da aplicação (auto-sync + self-heal)
+- [x] **✅ Repository Config**: Repositórios tx03 e dx03 configurados
+- [x] **✅ Automated Sync**: Prune + self-heal habilitados
+- [x] **✅ GitOps Workflow**: Commit → ArgoCD detect → Auto sync → Health check
+- [x] **✅ CLI Installed**: argocd CLI para gerenciar applications
+- [x] **✅ Documentação**: ARGOCD.md completo (900+ linhas) + k8s/argocd/README.md
+- [x] **✅ REFERENCE.md**: Comandos ArgoCD adicionados
+
 ### 🎯 Próximos Passos Opcionais
 
 #### Melhorias de Produção
@@ -974,21 +1003,22 @@ Ver mais: [COST_OPTIMIZATION.md](docs/COST_OPTIMIZATION.md)
 #### Otimizações Avançadas
 - [ ] **Cost Optimization**: Budget alerts, committed use discounts
 - [ ] **Performance**: CDN com Cloud CDN, caching strategies
-- [ ] **GitOps**: ArgoCD para continuous delivery
+- [x] **✅ GitOps**: ArgoCD para continuous delivery
 - [ ] **Service Mesh**: Anthos Service Mesh (Istio) com mTLS
 - [ ] **Multi-Region**: Expandir para alta disponibilidade global
 
 ### 📊 Estatísticas do Projeto
 
 ```
-Duração Total:          ~12 horas (incluindo troubleshooting)
-Deploys Realizados:     44 deploys (100% sucesso final)
-Issues Resolvidos:      24 problemas críticos
-Documentação:           2000+ linhas
+Duração Total:          ~13 horas (incluindo troubleshooting)
+Deploys Realizados:     45+ deploys (100% sucesso final)
+Issues Resolvidos:      25 problemas críticos
+Documentação:           10k+ linhas
 Status Final:           🟢 100% OPERACIONAL EM PRODUÇÃO
 Uptime:                 99.9%
 Response Time:          <50ms
 Database Latency:       3-5ms
+GitOps:                 ENABLED (ArgoCD v2.10.0)
 ```
 
 ---

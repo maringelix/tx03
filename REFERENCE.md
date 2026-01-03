@@ -48,6 +48,7 @@ MONITORING_NAMESPACE="monitoring"
 GATEKEEPER_NAMESPACE="gatekeeper-system"
 TRIVY_NAMESPACE="trivy-system"
 ISTIO_SYSTEM_NAMESPACE="istio-system"
+ARGOCD_NAMESPACE="argocd"
 ```
 
 ### Repositórios
@@ -107,6 +108,9 @@ kubectl port-forward -n istio-system svc/tracing 16686:80
 
 # Istio Grafana (http://localhost:3002)
 kubectl port-forward -n istio-system svc/grafana 3002:3000
+
+# ArgoCD UI (https://localhost:8080)
+kubectl port-forward svc/argocd-server -n argocd 8080:443
 ```
 
 ### Credenciais
@@ -523,6 +527,138 @@ kubectl get pods -n dx03-dev
 # Deve mostrar 2/2 (app + istio-proxy)
 ```
 
+---
+
+## 🚀 ArgoCD (GitOps)
+
+### Acesso ArgoCD
+
+```bash
+# Get admin password
+kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' | base64 -d
+
+# Port forward
+kubectl port-forward svc/argocd-server -n argocd 8080:443
+
+# Get LoadBalancer IP
+kubectl get svc argocd-server -n argocd
+
+# Login via CLI
+ARGOCD_SERVER=$(kubectl get svc argocd-server -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+ARGOCD_PASSWORD=$(kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' | base64 -d)
+argocd login $ARGOCD_SERVER --username admin --password $ARGOCD_PASSWORD --insecure
+```
+
+### Gerenciar Applications
+
+```bash
+# Listar applications
+argocd app list
+kubectl get applications -n argocd
+
+# Ver detalhes da application
+argocd app get dx03-app
+kubectl describe application dx03-app -n argocd
+
+# Sync manual
+argocd app sync dx03-app
+
+# Ver diff
+argocd app diff dx03-app
+
+# Ver histórico
+argocd app history dx03-app
+
+# Rollback
+argocd app rollback dx03-app
+
+# Ver logs
+argocd app logs dx03-app --follow
+```
+
+### Criar Nova Application
+
+```bash
+# Via CLI
+argocd app create my-app \
+  --repo https://github.com/maringelix/tx03.git \
+  --path k8s/application \
+  --dest-server https://kubernetes.default.svc \
+  --dest-namespace my-namespace \
+  --sync-policy automated \
+  --auto-prune \
+  --self-heal
+
+# Via kubectl
+kubectl apply -f k8s/argocd/application-my-app.yaml
+```
+
+### Gerenciar Repositórios
+
+```bash
+# Listar repos
+argocd repo list
+
+# Adicionar repo público
+argocd repo add https://github.com/user/repo
+
+# Adicionar repo privado
+argocd repo add https://github.com/user/repo \
+  --username <username> \
+  --password <token>
+
+# Remover repo
+argocd repo rm https://github.com/user/repo
+
+# Testar conexão
+argocd repo get https://github.com/maringelix/tx03.git
+```
+
+### Troubleshooting ArgoCD
+
+```bash
+# Status dos pods
+kubectl get pods -n argocd
+
+# Logs do server
+kubectl logs -f deployment/argocd-server -n argocd
+
+# Logs do application controller
+kubectl logs -f deployment/argocd-application-controller -n argocd
+
+# Refresh application (force fetch from Git)
+argocd app get dx03-app --refresh
+
+# Terminar sync operation travada
+argocd app terminate-op dx03-app
+
+# Restart ArgoCD components
+kubectl rollout restart deployment/argocd-server -n argocd
+kubectl rollout restart deployment/argocd-repo-server -n argocd
+kubectl rollout restart deployment/argocd-application-controller -n argocd
+```
+
+### Workflows ArgoCD
+
+```bash
+# Deploy ArgoCD
+gh workflow run deploy-argocd.yml
+
+# Install
+gh workflow run deploy-argocd.yml -f action=install
+
+# Upgrade
+gh workflow run deploy-argocd.yml -f action=upgrade
+
+# Get password
+gh workflow run deploy-argocd.yml -f action=get-password
+
+# Uninstall
+gh workflow run deploy-argocd.yml -f action=uninstall
+```
+
+---
+
 ### Acessar Dashboards Istio
 
 ```bash
@@ -707,6 +843,7 @@ gcloud projects get-iam-policy ${PROJECT_ID}
 - **Load Balancer Fix:** [LOAD_BALANCER_FIX.md](LOAD_BALANCER_FIX.md)
 - **Observability:** [OBSERVABILITY.md](OBSERVABILITY.md)
 - **Security:** [SECURITY.md](SECURITY.md)
+- **ArgoCD GitOps:** [ARGOCD.md](ARGOCD.md)
 - **Terraform Troubleshooting:** [TERRAFORM_PLAN_TROUBLESHOOTING.md](TERRAFORM_PLAN_TROUBLESHOOTING.md)
 
 ### Stack Específico
@@ -714,6 +851,7 @@ gcloud projects get-iam-policy ${PROJECT_ID}
 - **Observability Stack:** [k8s/observability/README.md](k8s/observability/README.md)
 - **Security Stack:** [k8s/security/README.md](k8s/security/README.md)
 - **Service Mesh (Istio):** [k8s/istio/README.md](k8s/istio/README.md)
+- **ArgoCD:** [k8s/argocd/README.md](k8s/argocd/README.md)
 
 ### Repositórios
 
@@ -781,6 +919,13 @@ gcloud projects get-iam-policy ${PROJECT_ID}
 - Istiod: RUNNING
 - Istio Ingress Gateway: RUNNING
 - Kiali: ACCESSIBLE (port 20001)
+
+### ✅ GitOps (ArgoCD)
+- ArgoCD Server: RUNNING
+- Repo Server: RUNNING
+- Application Controller: RUNNING
+- Applications: 1 (dx03-app)
+- UI: ACCESSIBLE (LoadBalancer)
 - Jaeger: ACCESSIBLE (port 16686)
 - Sidecar Injection: PENDING (aguardando restart)
 
