@@ -185,7 +185,7 @@ jobs:
           echo "✅ ArgoCD uninstalled"
 
       - name: Notify Slack
-        if: always()
+        if: always() && secrets.SLACK_WEBHOOK != ''
         uses: 8398a7/action-slack@v3
         with:
           status: ${{ job.status }}
