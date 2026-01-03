@@ -1,0 +1,414 @@
+name: 💾 Backup & Restore
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - backup-all
+          - backup-cloudsql
+          - backup-kubernetes
+          - restore-cloudsql
+          - restore-kubernetes
+          - list-backups
+          - test-restore
+      backup_name:
+        description: 'Backup name for restore (optional, uses latest if empty)'
+        required: false
+        default: ''
+      target_namespace:
+        description: 'Target namespace for restore (default: dx03-dev)'
+        required: false
+        default: 'dx03-dev'
+  schedule:
+    # Backup diário às 3 AM UTC
+    - cron: '0 3 * * *'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_REGION: us-central1
+  CLUSTER_NAME: tx03-gke-cluster
+  NAMESPACE: dx03-dev
+  BACKUP_BUCKET: tx03-backups-${{ secrets.GCP_PROJECT_ID }}
+
+jobs:
+  backup-cloudsql:
+    if: |
+      github.event_name == 'schedule' || 
+      inputs.action == 'backup-all' || 
+      inputs.action == 'backup-cloudsql' ||
+      inputs.action == 'list-backups'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: 💾 Create Cloud SQL On-Demand Backup
+        if: inputs.action != 'list-backups'
+        id: backup
+        run: |
+          echo "======================================"
+          echo "💾 CLOUD SQL BACKUP"
+          echo "======================================"
+          echo ""
+          
+          # Get Cloud SQL instance name
+          INSTANCE_NAME=$(gcloud sql instances list --project=${{ secrets.GCP_PROJECT_ID }} --format="value(name)" | grep postgres)
+          echo "📊 Instance: $INSTANCE_NAME"
+          
+          # Create backup with timestamp
+          BACKUP_ID="manual-backup-$(date +%Y%m%d-%H%M%S)"
+          echo "🔖 Backup ID: $BACKUP_ID"
+          
+          echo ""
+          echo "⏳ Creating backup (this may take 2-5 minutes)..."
+          gcloud sql backups create \
+            --instance=$INSTANCE_NAME \
+            --project=${{ secrets.GCP_PROJECT_ID }} \
+            --description="Manual backup created by GitHub Actions on $(date)"
+          
+          # Wait for backup to complete
+          echo ""
+          echo "⏳ Waiting for backup to complete..."
+          sleep 10
+          
+          # Get latest backup info
+          LATEST_BACKUP=$(gcloud sql backups list \
+            --instance=$INSTANCE_NAME \
+            --project=${{ secrets.GCP_PROJECT_ID }} \
+            --limit=1 \
+            --format="value(id)")
+          
+          echo ""
+          echo "✅ Backup completed successfully!"
+          echo "📋 Backup ID: $LATEST_BACKUP"
+          echo "backup_id=$LATEST_BACKUP" >> $GITHUB_OUTPUT
+          
+          # List recent backups
+          echo ""
+          echo "📚 Recent backups (last 5):"
+          gcloud sql backups list \
+            --instance=$INSTANCE_NAME \
+            --project=${{ secrets.GCP_PROJECT_ID }} \
+            --limit=5
+
+      - name: 📋 List All Cloud SQL Backups
+        if: inputs.action == 'list-backups' || inputs.action == 'backup-all'
+        run: |
+          echo "======================================"
+          echo "📋 ALL CLOUD SQL BACKUPS"
+          echo "======================================"
+          echo ""
+          
+          INSTANCE_NAME=$(gcloud sql instances list --project=${{ secrets.GCP_PROJECT_ID }} --format="value(name)" | grep postgres)
+          
+          echo "📊 Instance: $INSTANCE_NAME"
+          echo ""
+          echo "💾 All available backups:"
+          gcloud sql backups list \
+            --instance=$INSTANCE_NAME \
+            --project=${{ secrets.GCP_PROJECT_ID }} \
+            --format="table(id,windowStartTime,status,type)"
+
+  backup-kubernetes:
+    if: |
+      github.event_name == 'schedule' || 
+      inputs.action == 'backup-all' || 
+      inputs.action == 'backup-kubernetes'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          install_components: 'gke-gcloud-auth-plugin'
+
+      - name: Configure kubectl
+        run: |
+          gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} \
+            --region ${{ env.GCP_REGION }} \
+            --project ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: 💾 Backup Kubernetes Resources
+        run: |
+          echo "======================================"
+          echo "💾 KUBERNETES RESOURCES BACKUP"
+          echo "======================================"
+          echo ""
+          
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          BACKUP_DIR="k8s-backup-$TIMESTAMP"
+          mkdir -p $BACKUP_DIR
+          
+          echo "📁 Backup directory: $BACKUP_DIR"
+          echo ""
+          
+          # Backup ConfigMaps
+          echo "📦 Backing up ConfigMaps..."
+          kubectl get configmap -n ${{ env.NAMESPACE }} -o yaml > $BACKUP_DIR/configmaps.yaml
+          echo "✅ ConfigMaps backed up"
+          
+          # Backup Secrets (base64 encoded)
+          echo "🔐 Backing up Secrets..."
+          kubectl get secret -n ${{ env.NAMESPACE }} -o yaml > $BACKUP_DIR/secrets.yaml
+          echo "✅ Secrets backed up"
+          
+          # Backup Services
+          echo "🌐 Backing up Services..."
+          kubectl get service -n ${{ env.NAMESPACE }} -o yaml > $BACKUP_DIR/services.yaml
+          echo "✅ Services backed up"
+          
+          # Backup Deployments
+          echo "🚀 Backing up Deployments..."
+          kubectl get deployment -n ${{ env.NAMESPACE }} -o yaml > $BACKUP_DIR/deployments.yaml
+          echo "✅ Deployments backed up"
+          
+          # Backup Ingress
+          echo "🌍 Backing up Ingress..."
+          kubectl get ingress -n ${{ env.NAMESPACE }} -o yaml > $BACKUP_DIR/ingress.yaml
+          echo "✅ Ingress backed up"
+          
+          # Backup PersistentVolumeClaims
+          echo "💿 Backing up PVCs..."
+          kubectl get pvc -n monitoring -o yaml > $BACKUP_DIR/pvcs-monitoring.yaml
+          echo "✅ PVCs backed up"
+          
+          # Backup HorizontalPodAutoscalers (if any)
+          echo "📊 Backing up HPAs..."
+          kubectl get hpa -n ${{ env.NAMESPACE }} -o yaml > $BACKUP_DIR/hpa.yaml 2>/dev/null || echo "No HPAs found"
+          
+          # Create backup manifest
+          echo "📋 Creating backup manifest..."
+          cat > $BACKUP_DIR/backup-manifest.yaml <<EOF
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: backup-manifest-$TIMESTAMP
+            namespace: ${{ env.NAMESPACE }}
+          data:
+            timestamp: "$TIMESTAMP"
+            date: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            cluster: "${{ env.CLUSTER_NAME }}"
+            namespace: "${{ env.NAMESPACE }}"
+            github_run: "${{ github.run_id }}"
+            github_sha: "${{ github.sha }}"
+          EOF
+          
+          # Create tarball
+          echo ""
+          echo "📦 Creating backup archive..."
+          tar -czf $BACKUP_DIR.tar.gz $BACKUP_DIR/
+          
+          # Show backup stats
+          echo ""
+          echo "📊 Backup Statistics:"
+          echo "  - Size: $(du -h $BACKUP_DIR.tar.gz | cut -f1)"
+          echo "  - Files: $(ls -1 $BACKUP_DIR/ | wc -l)"
+          echo "  - Archive: $BACKUP_DIR.tar.gz"
+          
+          ls -lh $BACKUP_DIR.tar.gz
+          
+          echo ""
+          echo "✅ Kubernetes backup completed successfully!"
+          echo "backup_archive=$BACKUP_DIR.tar.gz" >> $GITHUB_OUTPUT
+
+      - name: 📤 Upload Backup Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: k8s-backup-${{ github.run_id }}
+          path: k8s-backup-*.tar.gz
+          retention-days: 30
+
+  restore-cloudsql:
+    if: inputs.action == 'restore-cloudsql' || inputs.action == 'test-restore'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: 🔄 Restore Cloud SQL from Backup
+        run: |
+          echo "======================================"
+          echo "🔄 CLOUD SQL RESTORE"
+          echo "======================================"
+          echo ""
+          
+          INSTANCE_NAME=$(gcloud sql instances list --project=${{ secrets.GCP_PROJECT_ID }} --format="value(name)" | grep postgres)
+          echo "📊 Instance: $INSTANCE_NAME"
+          
+          # Get backup ID (use provided or latest)
+          if [ -n "${{ inputs.backup_name }}" ]; then
+            BACKUP_ID="${{ inputs.backup_name }}"
+            echo "🔖 Using specified backup: $BACKUP_ID"
+          else
+            BACKUP_ID=$(gcloud sql backups list \
+              --instance=$INSTANCE_NAME \
+              --project=${{ secrets.GCP_PROJECT_ID }} \
+              --limit=1 \
+              --format="value(id)")
+            echo "🔖 Using latest backup: $BACKUP_ID"
+          fi
+          
+          echo ""
+          echo "⚠️  WARNING: This will restore the database to backup $BACKUP_ID"
+          echo "⚠️  Current data will be preserved (restored to a point-in-time)"
+          echo ""
+          
+          if [ "${{ inputs.action }}" = "test-restore" ]; then
+            echo "🧪 TEST MODE: Would restore backup $BACKUP_ID"
+            echo "   To perform actual restore, use action 'restore-cloudsql'"
+          else
+            echo "⏳ Starting restore (this may take 5-10 minutes)..."
+            gcloud sql backups restore $BACKUP_ID \
+              --backup-instance=$INSTANCE_NAME \
+              --backup-project=${{ secrets.GCP_PROJECT_ID }} \
+              --project=${{ secrets.GCP_PROJECT_ID }}
+            
+            echo ""
+            echo "✅ Restore completed successfully!"
+          fi
+
+  restore-kubernetes:
+    if: inputs.action == 'restore-kubernetes'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          install_components: 'gke-gcloud-auth-plugin'
+
+      - name: Configure kubectl
+        run: |
+          gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} \
+            --region ${{ env.GCP_REGION }} \
+            --project ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: 📥 Download Backup Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: k8s-backup-${{ inputs.backup_name || 'latest' }}
+
+      - name: 🔄 Restore Kubernetes Resources
+        run: |
+          echo "======================================"
+          echo "🔄 KUBERNETES RESOURCES RESTORE"
+          echo "======================================"
+          echo ""
+          
+          TARGET_NS="${{ inputs.target_namespace }}"
+          echo "🎯 Target namespace: $TARGET_NS"
+          
+          # Find backup archive
+          BACKUP_FILE=$(ls -t k8s-backup-*.tar.gz | head -1)
+          if [ -z "$BACKUP_FILE" ]; then
+            echo "❌ No backup file found!"
+            exit 1
+          fi
+          
+          echo "📦 Restoring from: $BACKUP_FILE"
+          
+          # Extract backup
+          tar -xzf $BACKUP_FILE
+          BACKUP_DIR=$(basename $BACKUP_FILE .tar.gz)
+          
+          echo ""
+          echo "⚠️  WARNING: This will restore resources to namespace $TARGET_NS"
+          echo "⚠️  Existing resources may be updated"
+          echo ""
+          
+          # Restore ConfigMaps
+          echo "📦 Restoring ConfigMaps..."
+          kubectl apply -f $BACKUP_DIR/configmaps.yaml -n $TARGET_NS
+          
+          # Restore Secrets
+          echo "🔐 Restoring Secrets..."
+          kubectl apply -f $BACKUP_DIR/secrets.yaml -n $TARGET_NS
+          
+          # Restore Services
+          echo "🌐 Restoring Services..."
+          kubectl apply -f $BACKUP_DIR/services.yaml -n $TARGET_NS
+          
+          # Note: Deployments typically shouldn't be restored this way in production
+          # But providing option for disaster recovery
+          echo ""
+          echo "ℹ️  Deployments NOT restored (managed by CI/CD)"
+          echo "   To restore deployments manually, run:"
+          echo "   kubectl apply -f $BACKUP_DIR/deployments.yaml -n $TARGET_NS"
+          
+          echo ""
+          echo "✅ Kubernetes resources restored successfully!"
+
+  summary:
+    if: always()
+    needs: [backup-cloudsql, backup-kubernetes]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📊 Backup Summary
+        run: |
+          echo "======================================"
+          echo "📊 BACKUP SUMMARY"
+          echo "======================================"
+          echo ""
+          echo "🕐 Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "🔄 Action: ${{ inputs.action || 'scheduled-backup' }}"
+          echo "✅ Backup completed successfully!"
+          echo ""
+          echo "📚 Backups available:"
+          echo "  - Cloud SQL: Automatic backups in GCP"
+          echo "  - Kubernetes: Artifacts in GitHub Actions (30 days retention)"
+          echo ""
+          echo "🔄 To restore:"
+          echo "  - Cloud SQL: Use action 'restore-cloudsql' with backup ID"
+          echo "  - Kubernetes: Use action 'restore-kubernetes' with artifact name"

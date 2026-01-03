@@ -23,12 +23,12 @@ resource "google_sql_database_instance" "postgres" {
     # Backup configuration
     backup_configuration {
       enabled                        = true
-      start_time                     = "02:00"
-      point_in_time_recovery_enabled = false
-      transaction_log_retention_days = 7
+      start_time                     = "03:00" # 3 AM UTC daily
+      point_in_time_recovery_enabled = true    # Enable PITR for disaster recovery
+      transaction_log_retention_days = 7       # Keep 7 days of transaction logs
 
       backup_retention_settings {
-        retained_backups = 7
+        retained_backups = 30  # Keep last 30 automated backups
         retention_unit   = "COUNT"
       }
     }
