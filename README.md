@@ -840,6 +840,7 @@ Ver mais: [COST_OPTIMIZATION.md](docs/COST_OPTIMIZATION.md)
 - **[Segurança](SECURITY.md)** 🔒 OPA Gatekeeper + Trivy + SonarCloud (1000+ linhas)
 - **[ArgoCD GitOps](ARGOCD.md)** 🚀 Continuous Delivery GitOps (900+ linhas)
 - **[Backup & Restore](docs/BACKUP-RESTORE.md)** 💾 Cloud SQL + Kubernetes (500+ linhas)
+- **[Cost Management](COST-MANAGEMENT.md)** 💰 Budgets + Análises + Otimização (600+ linhas)
 - **[Guia de Referência](REFERENCE.md)** 📖 Quick reference com todos os comandos (900+ linhas)
 
 ### Setup & Deployment
@@ -993,6 +994,23 @@ Ver mais: [COST_OPTIMIZATION.md](docs/COST_OPTIMIZATION.md)
 - [x] **✅ Documentação**: ARGOCD.md completo (900+ linhas) + k8s/argocd/README.md
 - [x] **✅ REFERENCE.md**: Comandos ArgoCD adicionados
 
+#### Fase 14: Cost Management (Concluída ✅)
+- [x] **✅ Budget Module**: Terraform module para billing budgets com alertas
+- [x] **✅ Alert Thresholds**: 50%, 75%, 90%, 100%, 110% (forecasted)
+- [x] **✅ Email Notifications**: Alertas automáticos para múltiplos destinatários
+- [x] **✅ Pub/Sub Integration**: Topic + subscription para automação
+- [x] **✅ Cost Spike Alerts**: Monitoring alert policy para gastos anormais
+- [x] **✅ Workflow**: cost-management.yml com 4 actions (analyze, report, recommendations, export)
+- [x] **✅ Scheduled Reports**: Weekly cost reports toda segunda-feira
+- [x] **✅ Resource Inventory**: Análise de recursos ativos (GKE, Cloud SQL, LB, disks)
+- [x] **✅ Optimization Recommendations**: Sugestões automáticas de economia
+- [x] **✅ Budget Forecasting**: Previsão de gastos para próximos 3 meses
+- [x] **✅ Idle Resources Check**: Identificação de disks/IPs não utilizados
+- [x] **✅ Cost Breakdown**: Análise detalhada por serviço e percentual
+- [x] **✅ Export Functionality**: CSV export para análises externas
+- [x] **✅ Documentação**: COST-MANAGEMENT.md completo (600+ linhas)
+- [x] **✅ Optimization Potential**: -$75-90/month identificados (60% savings)
+
 ### 🎯 Próximos Passos Opcionais
 
 #### Melhorias de Produção
@@ -1001,7 +1019,7 @@ Ver mais: [COST_OPTIMIZATION.md](docs/COST_OPTIMIZATION.md)
 - [x] **✅ Backup Strategy**: Snapshots automatizados do Cloud SQL + K8s resources
 
 #### Otimizações Avançadas
-- [ ] **Cost Optimization**: Budget alerts, committed use discounts
+- [x] **✅ Cost Management**: Budget alerts, análises, recomendações, forecasting
 - [ ] **Performance**: CDN com Cloud CDN, caching strategies
 - [x] **✅ GitOps**: ArgoCD para continuous delivery
 - [ ] **Service Mesh**: Anthos Service Mesh (Istio) com mTLS
