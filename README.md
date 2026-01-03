@@ -240,6 +240,10 @@ Dashboards:                4 dashboards configurados
 ✅ **Istio Sidecar Injection** - Desabilitada (incompatível com GKE Autopilot)  
 ✅ **Troubleshooting Istio** - Crashlooping pods resolvidos (4 pods healthy, 0 restarts)  
 ✅ **Automated Cleanup Workflow** - troubleshoot-pods.yml detecta e remove crashloops  
+✅ **Backup & Restore Stack** - Cloud SQL PITR + K8s resources backup (RPO < 24h, RTO < 30min)  
+✅ **Automated Daily Backups** - 3 AM UTC (Cloud SQL + Kubernetes manifests)  
+✅ **Point-in-Time Recovery** - 7 dias de transaction logs (Cloud SQL)  
+✅ **30 dias de retenção** - Cloud SQL backups + GitHub Actions artifacts  
 
 ### 🎯 Conquistas Técnicas
 
@@ -278,6 +282,8 @@ Dashboards:                4 dashboards configurados
 - [x] Documentação completa (4000+ linhas)
 - [x] 47 deploys incrementais bem-sucedidos
 - [x] **Istio Service Mesh**: Infraestrutura 100% deployada e configurada
+- [x] **Backup & Restore Stack**: Automated daily backups (Cloud SQL + K8s)
+- [x] **Point-in-Time Recovery**: 7 dias de transaction logs para recuperação granular
 - [x] **10+ Workflow Failures**: Debugados e resolvidos com 3 fixes consecutivos
 - [x] **1200+ linhas de documentação Istio**: Guia completo + histórico de implementação
 
@@ -400,6 +406,7 @@ Dashboards:                4 dashboards configurados
 > - [TERRAFORM_PLAN_TROUBLESHOOTING.md](TERRAFORM_PLAN_TROUBLESHOOTING.md) - Troubleshooting Terraform
 > - **[OBSERVABILITY.md](OBSERVABILITY.md)** - Stack de Observabilidade (Prometheus + Grafana + Alertmanager)
 > - **[SECURITY.md](SECURITY.md)** - Security Stack completa (OPA Gatekeeper + Trivy + SonarCloud)
+> - **[BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md)** - Backup & Restore Stack (Cloud SQL + Kubernetes)
 > - **[REFERENCE.md](REFERENCE.md)** - Guia de referência rápida com todos os comandos
 > - **[k8s/istio/README.md](k8s/istio/README.md)** - Service Mesh Istio (463 linhas)
 > - [k8s/observability/README.md](k8s/observability/README.md) - Configuração detalhada de observabilidade
@@ -915,18 +922,54 @@ Ver mais: [COST_OPTIMIZATION.md](docs/COST_OPTIMIZATION.md)
 - [x] **✅ HTTPS Ativo**: https://dx03.ddns.net funcionando
 - [ ] **Redirect HTTP → HTTPS**: Opcional (após configuração)
 
-#### Fase 8: Observabilidade (Parcial ⚠️)
+#### Fase 8: Observabilidade (Concluída ✅)
+- [x] **✅ Prometheus Stack**: Helm chart kube-prometheus-stack (CRDs, Operator, Prometheus, Grafana, Alertmanager)
+- [x] **✅ Backend Metrics**: prom-client integrado (HTTP, DB, system metrics)
+- [x] **✅ Grafana Dashboards**: 4 dashboards customizados (Application, Node Exporter, PostgreSQL, System)
 - [x] **✅ Cloud Monitoring**: Métricas automáticas de GKE e Cloud SQL
 - [x] **✅ Cloud Logging**: Logs de aplicação e infraestrutura
-- [ ] **⏳ Dashboards Customizados**: Pendente configuração
-- [ ] **⏳ Alerting Policies**: Pendente configuração de alertas
+
+#### Fase 9: Security Hardening (Concluída ✅)
+- [x] **✅ OPA Gatekeeper**: Policy engine instalado (Helm chart)
+- [x] **✅ Security Policies**: 6 constraint templates (allowed repos, required labels, probes, resource limits, read-only root, run as non-root)
+- [x] **✅ Trivy Operator**: Vulnerability scanning de containers
+- [x] **✅ SonarCloud**: Code quality analysis (aplicação + infraestrutura)
+
+#### Fase 10: Documentação (Concluída ✅)
+- [x] **✅ OBSERVABILITY.md**: Guia completo da stack de observabilidade (350+ linhas)
+- [x] **✅ SECURITY.md**: Documentação de segurança (400+ linhas)
+- [x] **✅ SERVICE-MESH-FINAL-DECISION.md**: Decisão sobre Istio (400+ linhas)
+- [x] **✅ README.md atualizado**: Documentação consolidada de todo o projeto
+
+#### Fase 11: Service Mesh (Parcialmente Concluída ⚠️)
+- [x] **✅ Istio Installation**: Infraestrutura instalada (istiod 1.20.1 + ingress gateway + addons)
+- [x] **✅ Istio Addons**: Kiali, Jaeger, Prometheus, Grafana deployados
+- [x] **✅ Sidecar Injection**: Tentativa de implementação
+- [x] **✅ Troubleshooting**: Pods crashlooping resolvidos (4 pods healthy)
+- [x] **✅ Status Final**: Sidecar injection DESABILITADA (incompatível com GKE Autopilot - NET_ADMIN capability)
+- [x] **✅ Cleanup Workflows**: troubleshoot-pods.yml + disable-istio-injection.yml
+- [x] **✅ Documentação**: SERVICE-MESH-FINAL-DECISION.md atualizado
+
+#### Fase 12: Backup & Restore (Concluída ✅)
+- [x] **✅ Backup Workflow**: backup-restore.yml com 6 actions (backup-all, backup-cloudsql, backup-kubernetes, restore-cloudsql, restore-kubernetes, list-backups)
+- [x] **✅ Cloud SQL Backup**: On-demand backups criados via gcloud
+- [x] **✅ Kubernetes Backup**: Export de ConfigMaps, Secrets, Services, Deployments, Ingress, PVCs, HPAs para tarball
+- [x] **✅ GitHub Artifacts**: Upload automático com 30 dias de retenção
+- [x] **✅ Scheduled Backups**: Daily execution às 3 AM UTC
+- [x] **✅ PITR Enabled**: Point-in-Time Recovery habilitado no Cloud SQL (7 dias de transaction logs)
+- [x] **✅ Backup Retention**: 30 backups mantidos (anteriormente 7)
+- [x] **✅ Restore Procedures**: Workflows para restore de Cloud SQL e Kubernetes
+- [x] **✅ Documentação**: BACKUP-RESTORE.md completo (500+ linhas)
+- [x] **✅ Testing**: Workflow testado e validado (backup-all successful)
+- [x] **✅ RPO**: < 24 horas (Recovery Point Objective)
+- [x] **✅ RTO**: < 30 minutos (Recovery Time Objective)
 
 ### 🎯 Próximos Passos Opcionais
 
 #### Melhorias de Produção
 - [ ] **Uptime Checks**: Monitoramento com alertas
 - [ ] **HPA (Horizontal Pod Autoscaler)**: Escala automática
-- [ ] **Backup Strategy**: Snapshots automatizados do Cloud SQL
+- [x] **✅ Backup Strategy**: Snapshots automatizados do Cloud SQL + K8s resources
 
 #### Otimizações Avançadas
 - [ ] **Cost Optimization**: Budget alerts, committed use discounts
