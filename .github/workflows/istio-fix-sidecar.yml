@@ -10,7 +10,8 @@ on:
         type: choice
         options:
           - diagnose
-          - fix
+          - disable-injection
+          - enable-injection
           - force-recreate
 
 permissions:
@@ -18,7 +19,6 @@ permissions:
   id-token: write
 
 env:
-  GCP_PROJECT_ID: project-28e61e96-b6ac-4249-a21f
   GCP_REGION: us-central1
   CLUSTER_NAME: tx03-gke-cluster
 
@@ -46,7 +46,7 @@ jobs:
         run: |
           gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} \
             --region ${{ env.GCP_REGION }} \
-            --project ${{ env.GCP_PROJECT_ID }}
+            --project ${{ secrets.GCP_PROJECT_ID }}
 
       - name: 🔍 Diagnose Sidecar Injection
         id: diagnose
@@ -100,7 +100,77 @@ jobs:
           kubectl logs -n istio-system deployment/istiod --tail=50 | grep -i "inject\|webhook\|dx03-dev" || echo "Nenhum log relevante encontrado"
           echo ""
 
-      - name: 🔧 Fix - Verificar e Reinstalar Webhook
+      - name: � Disable Sidecar Injection
+        if: inputs.action == 'disable-injection'
+        run: |
+          echo "======================================"
+          echo "🚫 DESABILITANDO SIDECAR INJECTION"
+          echo "======================================"
+          echo ""
+          
+          echo "Removendo label istio-injection do namespace..."
+          kubectl label namespace dx03-dev istio-injection- --ignore-not-found=true
+          echo "✅ Label removido"
+          
+          echo ""
+          echo "Verificando namespace atualizado..."
+          kubectl get namespace dx03-dev --show-labels
+          
+          echo ""
+          echo "🗑️  Deletando pods crashlooping com sidecars..."
+          # Delete apenas pods com init container istio-validation
+          kubectl get pods -n dx03-dev -o json | \
+            jq -r '.items[] | select(.spec.initContainers[]?.name == "istio-validation") | .metadata.name' | \
+            while read pod; do
+              echo "Deletando pod com sidecar: $pod"
+              kubectl delete pod $pod -n dx03-dev --grace-period=0 --force
+            done
+          
+          echo ""
+          echo "⏳ Aguardando novos pods sem sidecars serem criados (30s)..."
+          sleep 30
+          
+          echo ""
+          echo "📊 Status dos pods (devem ter apenas 1 container cada):"
+          kubectl get pods -n dx03-dev -o wide
+          
+          echo ""
+          echo "Verificando containers por pod:"
+          kubectl get pods -n dx03-dev -o json | jq -r '.items[] | "\(.metadata.name): \(.spec.containers | length) container(s)"'
+
+      - name: ✅ Enable Sidecar Injection
+        if: inputs.action == 'enable-injection'
+        run: |
+          echo "======================================"
+          echo "✅ HABILITANDO SIDECAR INJECTION"
+          echo "======================================"
+          echo ""
+          
+          echo "Adicionando label istio-injection ao namespace..."
+          kubectl label namespace dx03-dev istio-injection=enabled --overwrite
+          echo "✅ Label adicionado"
+          
+          echo ""
+          echo "Verificando namespace atualizado..."
+          kubectl get namespace dx03-dev --show-labels
+          
+          echo ""
+          echo "🗑️  Deletando pods existentes para forçar injeção..."
+          kubectl delete pod --all -n dx03-dev
+          
+          echo ""
+          echo "⏳ Aguardando novos pods com sidecars serem criados (60s)..."
+          sleep 60
+          
+          echo ""
+          echo "📊 Status dos pods (devem ter 2 containers cada):"
+          kubectl get pods -n dx03-dev -o wide
+          
+          echo ""
+          echo "Verificando containers por pod:"
+          kubectl get pods -n dx03-dev -o json | jq -r '.items[] | "\(.metadata.name): \(.spec.containers | length) container(s)"'
+
+      - name: �🔧 Fix - Verificar e Reinstalar Webhook
         if: inputs.action == 'fix'
         run: |
           echo "======================================"
