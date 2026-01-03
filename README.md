@@ -93,31 +93,50 @@ Este repositório contém a infraestrutura do **tx03**, o terceiro projeto da s�
 - **Retenção:** 7 dias (Prometheus) + PVC persistente (Grafana 5Gi)
 - **📚 Documentação Completa:** [OBSERVABILITY.md](OBSERVABILITY.md) | [k8s/observability/README.md](k8s/observability/README.md)
 
-###  🕸️ Service Mesh - NOT VIABLE ON GKE AUTOPILOT
-- **Status:** ❌ **ALL SOLUTIONS BLOCKED**
+###  🕸️ Service Mesh - INCOMPATIBLE WITH GKE AUTOPILOT
+- **Status:** ⚠️ **PARTIALLY INSTALLED BUT NOT ACTIVE**
 - **Current State:** App running without service mesh (1/1 containers per pod)
+- **Last Update:** January 3, 2026
+
+#### 📊 What Was Done
+**Istio v1.20.1 Infrastructure Installed:**
+- ✅ Istiod (control plane) deployed in `istio-system` namespace
+- ✅ Istio Ingress Gateway configured
+- ✅ Observability addons: Kiali + Jaeger + Prometheus + Grafana
+- ✅ Configuration files: Gateway, VirtualService, DestinationRules
+
+**Sidecar Injection Disabled:**
+- ❌ Attempted automatic injection → pods crashlooped (10+ restarts)
+- ❌ GKE Warden blocked `istio-proxy` sidecars (security context violations)
+- ✅ Labels removed: `istio-injection=enabled` and `istio.io/rev=default`
+- ✅ Crashlooping pods deleted and recreated without sidecars
+- ✅ All 4 pods now healthy (1/1 containers each, 0 restarts)
 
 #### 🔒 GKE Autopilot Limitations
 **All service mesh architectures are blocked by GKE Autopilot security policies:**
 
 1. **❌ Istio Sidecar Injection** - Blocked by GKE Warden
-   - Error: `istio-proxy` security context violates Autopilot policies
-   - Documentation: [GKE-WARDEN-ISSUE.md](docs/GKE-WARDEN-ISSUE.md)
+   - Error: `istio-validation` init container failed (iptables validation)
+   - Root cause: Istio CNI requires `NET_ADMIN` capability (not allowed on Autopilot)
+   - Result: Pods stuck in `Init:CrashLoopBackOff` state
+   - Solution: Sidecar injection DISABLED
 
 2. **❌ Istio Ambient Mesh** - Blocked by GKE Warden
-   - Error: ztunnel requires `NET_ADMIN` capability (not allowed)
-   - Capability restrictions: Autopilot only allows limited set
+   - Error: ztunnel DaemonSet requires `NET_ADMIN` capability
+   - Cannot patch `kube-system` namespace (access denied)
+   - Fundamental incompatibility with eBPF-based mesh
 
 3. **❌ Anthos Service Mesh (ASM)** - Blocked by IAM Permissions
    - Error: Service account cannot register cluster to Fleet
    - Missing permissions: `gkehub.memberships.create`, Fleet API access
    - Cost: ~$4-8/month (even if permissions were granted)
 
-#### ✅ Current Solution: No Service Mesh
+#### ✅ Current Solution: No Service Mesh (Production Ready)
 - **Status:** 🟢 App fully operational
-- **Pods:** 2/2 backend + 2/2 frontend (all 1/1 containers)
+- **Pods:** 2/2 backend + 2/2 frontend (all 1/1 containers, 0 restarts)
 - **Security:** Cloud Armor WAF protecting endpoints
 - **Observability:** Prometheus + Grafana + Alertmanager monitoring
+- **Istio:** Infrastructure installed but sidecar injection DISABLED
 - **Cost:** $0 for mesh (only GKE Autopilot compute)
 
 #### 📚 Documentation
@@ -217,8 +236,10 @@ Dashboards:                4 dashboards configurados
 ✅ **Code quality monitoring** em infraestrutura e aplicação  
 ✅ **Documentação completa** (5000+ linhas) publicada no GitHub  
 ✅ **CI/CD pipeline** totalmente automatizado  
-✅ **Istio Service Mesh** - Base instalada (istiod + ingress gateway + addons)  
-🔄 **Istio Sidecar Injection** - Em progresso (aguardando restart de pods)  
+✅ **Istio Service Mesh** - Infraestrutura instalada (istiod + ingress gateway + addons)  
+✅ **Istio Sidecar Injection** - Desabilitada (incompatível com GKE Autopilot)  
+✅ **Troubleshooting Istio** - Crashlooping pods resolvidos (4 pods healthy, 0 restarts)  
+✅ **Automated Cleanup Workflow** - troubleshoot-pods.yml detecta e remove crashloops  
 
 ### 🎯 Conquistas Técnicas
 
