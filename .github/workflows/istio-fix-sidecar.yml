@@ -109,8 +109,8 @@ jobs:
           echo ""
           
           echo "Removendo labels de injeção do namespace..."
-          kubectl label namespace dx03-dev istio-injection- --ignore-not-found=true
-          kubectl label namespace dx03-dev istio.io/rev- --ignore-not-found=true
+          kubectl label namespace dx03-dev istio-injection- 2>/dev/null || true
+          kubectl label namespace dx03-dev istio.io/rev- 2>/dev/null || true
           echo "✅ Labels removidos (istio-injection e istio.io/rev)"
           
           echo ""
