@@ -171,6 +171,7 @@ jobs:
             -var="project_id=${{ secrets.GCP_PROJECT_ID }}" \
             -var="environment=${{ env.ENVIRONMENT }}" \
             -var="service_account_email=${{ secrets.WIF_SERVICE_ACCOUNT }}" \
+            -refresh=false \
             -no-color \
             2>&1 | tee destroy_plan_full.txt
           
@@ -221,6 +222,7 @@ jobs:
             -var="project_id=${{ secrets.GCP_PROJECT_ID }}" \
             -var="environment=${{ env.ENVIRONMENT }}" \
             -var="service_account_email=${{ secrets.WIF_SERVICE_ACCOUNT }}" \
+            -refresh=false \
             -out=destroy.tfplan
           
           echo "✅ Destroy plan created successfully"
