@@ -102,6 +102,53 @@ jobs:
           echo "📦 Artifact Registry:"
           gcloud artifacts repositories list --format="table(name,location,format)" || echo "None"
 
+      - name: Delete Kubernetes-Managed Resources First
+        continue-on-error: true
+        run: |
+          echo "🧹 Deleting Kubernetes-managed resources BEFORE Terraform destroy..."
+          
+          # Authenticate to GKE cluster
+          echo "Connecting to GKE cluster..."
+          gcloud container clusters get-credentials tx03-gke-cluster \
+            --region=us-central1 \
+            --project=${{ secrets.GCP_PROJECT_ID }} || {
+            echo "⚠️  Could not connect to GKE cluster (may already be deleted)"
+            exit 0
+          }
+          
+          # Delete all Ingresses (triggers cleanup of LB, SSL certs, backend services)
+          echo "🌐 Deleting all Ingresses..."
+          kubectl get ingress --all-namespaces -o json | \
+            jq -r '.items[] | "\(.metadata.namespace) \(.metadata.name)"' | \
+            while read NS NAME; do
+              echo "  Deleting ingress: $NAME in $NS"
+              kubectl delete ingress "$NAME" -n "$NS" --wait=true --timeout=5m || true
+            done
+          
+          # Delete all LoadBalancer type Services (triggers cleanup of external LBs)
+          echo "⚖️  Deleting all LoadBalancer Services..."
+          kubectl get svc --all-namespaces -o json | \
+            jq -r '.items[] | select(.spec.type=="LoadBalancer") | "\(.metadata.namespace) \(.metadata.name)"' | \
+            while read NS NAME; do
+              echo "  Deleting service: $NAME in $NS"
+              kubectl delete svc "$NAME" -n "$NS" --wait=true --timeout=5m || true
+            done
+          
+          # Delete all PVCs (triggers cleanup of persistent disks)
+          echo "💾 Deleting all PVCs..."
+          kubectl get pvc --all-namespaces -o json | \
+            jq -r '.items[] | "\(.metadata.namespace) \(.metadata.name)"' | \
+            while read NS NAME; do
+              echo "  Deleting PVC: $NAME in $NS"
+              kubectl delete pvc "$NAME" -n "$NS" --wait=true --timeout=5m || true
+            done
+          
+          # Wait for GKE controllers to clean up cloud resources
+          echo "⏳ Waiting for GKE to clean up cloud resources (90 seconds)..."
+          sleep 90
+          
+          echo "✅ Kubernetes resources cleanup initiated"
+
       - name: Terraform Init
         working-directory: terraform/environments/${{ env.ENVIRONMENT }}
         run: |
@@ -141,32 +188,180 @@ jobs:
         if: always()
         continue-on-error: true
         run: |
-          echo "🧹 Force cleanup of remaining resources..."
+          echo "🧹 Enhanced force cleanup of remaining resources..."
           
-          # Delete any remaining GKE clusters
+          # 1. Delete any remaining GKE clusters
+          echo "🎯 Cleaning up GKE clusters..."
           CLUSTERS=$(gcloud container clusters list --format="value(name)" --filter="name~tx03-" || echo "")
           for CLUSTER in $CLUSTERS; do
-            echo "Deleting cluster: $CLUSTER"
+            echo "  Deleting cluster: $CLUSTER"
             gcloud container clusters delete "$CLUSTER" --region=us-central1 --quiet || true
           done
           
-          # Delete Cloud SQL instances (with protection)
+          # 2. Delete Cloud SQL instances (with protection removal)
+          echo "🗄️  Cleaning up Cloud SQL..."
           SQL_INSTANCES=$(gcloud sql instances list --format="value(name)" --filter="name~tx03-" || echo "")
           for INSTANCE in $SQL_INSTANCES; do
-            echo "Deleting SQL instance: $INSTANCE"
-            # Remove deletion protection first
+            echo "  Removing deletion protection from: $INSTANCE"
             gcloud sql instances patch "$INSTANCE" --no-deletion-protection --quiet || true
+            echo "  Deleting SQL instance: $INSTANCE"
             gcloud sql instances delete "$INSTANCE" --quiet || true
           done
           
-          # Delete Load Balancers
-          LBS=$(gcloud compute forwarding-rules list --format="value(name)" --filter="name~tx03-" || echo "")
-          for LB in $LBS; do
-            echo "Deleting load balancer: $LB"
-            gcloud compute forwarding-rules delete "$LB" --global --quiet || true
+          # 3. Delete forwarding rules (Load Balancers)
+          echo "🌐 Cleaning up Load Balancer forwarding rules..."
+          # Global forwarding rules
+          FWD_RULES=$(gcloud compute forwarding-rules list --global --format="value(name)" \
+            --filter="name~(tx03|k8s2|k8s-fw)" 2>/dev/null || echo "")
+          for RULE in $FWD_RULES; do
+            echo "  Deleting global forwarding rule: $RULE"
+            gcloud compute forwarding-rules delete "$RULE" --global --quiet || true
+          done
+          # Regional forwarding rules
+          echo ""
+          
+          # Count remaining resources
+          REMAINING_CLUSTERS=$(gcloud container clusters list --filter="name~tx03-" --format="value(name)" 2>/dev/null | wc -l)
+          REMAINING_SQL=$(gcloud sql instances list --filter="name~tx03-" --format="value(name)" 2>/dev/null | wc -l)
+          REMAINING_FWD_RULES=$(gcloud compute forwarding-rules list --filter="name~(tx03|k8s)" --format="value(name)" 2>/dev/null | wc -l)
+          REMAINING_BACKENDS=$(gcloud compute backend-services list --filter="name~(tx03|k8s)" --format="value(name)" 2>/dev/null | wc -l)
+          REMAINING_CERTS=$(gcloud compute ssl-certificates list --filter="name~(tx03|mcrt)" --format="value(name)" 2>/dev/null | wc -l)
+          REMAINING_DISKS=$(gcloud compute disks list --filter="name~pvc-" --format="value(name)" 2>/dev/null | wc -l)
+          REMAINING_FW_RULES=$(gcloud compute firewall-rules list --filter="network~tx03 AND name~k8s" --format="value(name)" 2>/dev/null | wc -l)
+          REMAINING_IPS=$(gcloud compute addresses list --filter="name~tx03" --format="value(name)" 2>/dev/null | wc -l)
+          
+          echo "📊 Remaining resources count:"
+          echo "  🎯 GKE Clusters: $REMAINING_CLUSTERS"
+          echo "  🗄️  Cloud SQL: $REMAINING_SQL"
+          echo "  🌐 Forwarding Rules: $REMAINING_FWD_RULES"
+          echo "  🔙 Backend Services: $REMAINING_BACKENDS"
+          echo "  🔒 SSL Certificates: $REMAINING_CERTS"
+          echo "  💾 Orphan Disks: $REMAINING_DISKS"
+          echo "  🚪 K8s Firewall Rules: $REMAINING_FW_RULES"
+          echo "  🌍 Static IPs: $REMAINING_IPS"
+          echo ""
+          
+          TOTAL=$((REMAINING_CLUSTERS + REMAINING_SQL + REMAINING_FWD_RULES + REMAINING_BACKENDS + REMAINING_CERTS + REMAINING_DISKS + REMAINING_FW_RULES + REMAINING_IPS))
+          
+          if [ "$TOTAL" -eq "0" ]; then
+            echo "✅ All resources destroyed successfully! No orphaned resources found."
+          else
+            echo "⚠️  Warning: $TOTAL resources still remain."
+            echo ""
+            echo "📋 Details of remaining resources:"
+            
+            if [ "$REMAINING_CLUSTERS" -gt "0" ]; then
+              echo "  GKE Clusters:"
+              gcloud container clusters list --filter="name~tx03-" --format="  value(name,location)" 2>/dev/null
+            fi
+            
+            if [ "$REMAINING_SQL" -gt "0" ]; then
+              echo "  Cloud SQL:"
+              gcloud sql instances list --filter="name~tx03-" --format="  value(name,region)" 2>/dev/null
+            fi
+            
+            if [ "$REMAINING_FWD_RULES" -gt "0" ]; then
+              echo "  Forwarding Rules:"
+              gcloud compute forwarding-rules list --filter="name~(tx03|k8s)" --format="  value(name,IPAddress)" 2>/dev/null
+            fi
+            
+            if [ "$REMAINING_BACKENDS" -gt "0" ]; then
+              echo "  Backend Services:"
+              gcloud compute backend-services list --filter="name~(tx03|k8s)" --format="  value(name)" 2>/dev/null
+            fi
+            
+            if [ "$REMAINING_CERTS" -gt "0" ]; then
+              echo "  SSL Certificates:"
+              gcloud compute ssl-certificates list --filter="name~(tx03|mcrt)" --format="  value(name)" 2>/dev/null
+            fi
+            
+            if [ "$REMAINING_DISKS" -gt "0" ]; then
+              echo "  Orphan Disks:"
+              gcloud compute disks list --filter="name~pvc-" --format="  value(name,zone,sizeGb)" 2>/dev/null
+            fi
+            
+            if [ "$REMAINING_FW_RULES" -gt "0" ]; then
+              echo "  K8s Firewall Rules:"
+              gcloud compute firewall-rules list --filter="network~tx03 AND name~k8s" --format="  value(name)" 2>/dev/null
+            fi
+            
+            if [ "$REMAINING_IPS" -gt "0" ]; then
+              echo "  Static IPs:"
+              gcloud compute addresses list --filter="name~tx03" --format="  value(name,address)" 2>/dev/null
+            fi
+            
+            echo ""
+            echo "⚠️  Manual cleanup may be required. Check GCP Console for details
+            --filter="name~(tx03|k8s2)" 2>/dev/null || echo "")
+          for PROXY in $HTTPS_PROXIES; do
+            echo "  Deleting HTTPS proxy: $PROXY"
+            gcloud compute target-https-proxies delete "$PROXY" --quiet || true
           done
           
-          echo "✅ Force cleanup complete!"
+          # 5. Delete URL maps
+          echo "🗺️  Cleaning up URL maps..."
+          URL_MAPS=$(gcloud compute url-maps list --format="value(name)" \
+            --filter="name~(tx03|k8s2)" 2>/dev/null || echo "")
+          for MAP in $URL_MAPS; do
+            echo "  Deleting URL map: $MAP"
+            gcloud compute url-maps delete "$MAP" --quiet || true
+          done
+          
+          # 6. Delete backend services
+          echo "🔙 Cleaning up backend services..."
+          BACKENDS=$(gcloud compute backend-services list --format="value(name)" \
+            --filter="name~(tx03|k8s1)" 2>/dev/null || echo "")
+          for BACKEND in $BACKENDS; do
+            echo "  Deleting backend service: $BACKEND"
+            gcloud compute backend-services delete "$BACKEND" --global --quiet || true
+          done
+          
+          # 7. Delete SSL certificates
+          echo "🔒 Cleaning up SSL certificates..."
+          CERTS=$(gcloud compute ssl-certificates list --format="value(name)" \
+            --filter="name~(tx03|mcrt)" 2>/dev/null || echo "")
+          for CERT in $CERTS; do
+            echo "  Deleting SSL certificate: $CERT"
+            gcloud compute ssl-certificates delete "$CERT" --quiet || true
+          done
+          
+          # 8. Delete orphaned persistent disks
+          echo "💾 Cleaning up orphaned disks..."
+          ORPHAN_DISKS=$(gcloud compute disks list --format="value(name,zone)" \
+            --filter="name~pvc- AND -users:*" 2>/dev/null || echo "")
+          echo "$ORPHAN_DISKS" | while IFS=$'\t' read -r DISK ZONE; do
+            if [ -n "$DISK" ] && [ -n "$ZONE" ]; then
+              echo "  Deleting orphaned disk: $DISK in $ZONE"
+              gcloud compute disks delete "$DISK" --zone="$ZONE" --quiet || true
+            fi
+          done
+          
+          # 9. Delete K8s-created firewall rules
+          echo "🚪 Cleaning up K8s firewall rules..."
+          FW_RULES=$(gcloud compute firewall-rules list --format="value(name)" \
+            --filter="network~tx03 AND name~k8s" 2>/dev/null || echo "")
+          for RULE in $FW_RULES; do
+            echo "  Deleting K8s firewall rule: $RULE"
+            gcloud compute firewall-rules delete "$RULE" --quiet || true
+          done
+          
+          # 10. Delete any remaining static IPs
+          echo "🌍 Cleaning up static IPs..."
+          STATIC_IPS=$(gcloud compute addresses list --format="value(name,region)" \
+            --filter="name~tx03 AND status:RESERVED" 2>/dev/null || echo "")
+          echo "$STATIC_IPS" | while IFS=$'\t' read -r IP_NAME REGION; do
+            if [ -n "$IP_NAME" ]; then
+              if [ -n "$REGION" ] && [ "$REGION" != "None" ]; then
+                echo "  Deleting regional IP: $IP_NAME in $REGION"
+                gcloud compute addresses delete "$IP_NAME" --region="$REGION" --quiet || true
+              else
+                echo "  Deleting global IP: $IP_NAME"
+                gcloud compute addresses delete "$IP_NAME" --global --quiet || true
+              fi
+            fi
+          done
+          
+          echo "✅ Enhanced force cleanup complete!"
 
       - name: Verify Destruction
         run: |
@@ -255,27 +450,67 @@ jobs:
           echo "**Environment:** ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
           echo "**Initiated by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "**Backend destroyed:** ${{ github.event.inputs.destroy_backend }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 🔄 Destruction Process" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "1. ✅ **K8s Resources Cleanup** - Deleted Ingresses, LoadBalancer Services, and PVCs" >> $GITHUB_STEP_SUMMARY
+          echo "2. ✅ **Terraform Destroy** - Removed all infrastructure managed by Terraform" >> $GITHUB_STEP_SUMMARY
+          echo "3. ✅ **Enhanced Force Cleanup** - Cleaned up:" >> $GITHUB_STEP_SUMMARY
+          echo "   - GKE Clusters and node disks" >> $GITHUB_STEP_SUMMARY
+          echo "   - Cloud SQL instances (with protection removal)" >> $GITHUB_STEP_SUMMARY
+          echo "   - Load Balancer components (forwarding rules, proxies, URL maps)" >> $GITHUB_STEP_SUMMARY
+          echo "   - Backend services" >> $GITHUB_STEP_SUMMARY
+          echo "   - SSL certificates (managed and self-signed)" >> $GITHUB_STEP_SUMMARY
+          echo "   - Orphaned persistent disks" >> $GITHUB_STEP_SUMMARY
+          echo "   - K8s-created firewall rules" >> $GITHUB_STEP_SUMMARY
+          echo "   - Static IP addresses" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           if [ "${{ needs.destroy-infrastructure.result }}" == "success" ]; then
-            echo "✅ Infrastructure destroyed successfully" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **Infrastructure destroyed successfully**" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ Infrastructure destruction failed or was cancelled" >> $GITHUB_STEP_SUMMARY
+            echo "❌ **Infrastructure destruction failed or was cancelled**" >> $GITHUB_STEP_SUMMARY
           fi
           
           if [ "${{ github.event.inputs.destroy_backend }}" == "true" ]; then
             if [ "${{ needs.destroy-backend.result }}" == "success" ]; then
-              echo "✅ Terraform backend destroyed successfully" >> $GITHUB_STEP_SUMMARY
+              echo "✅ **Terraform backend destroyed successfully**" >> $GITHUB_STEP_SUMMARY
             else
-              echo "❌ Terraform backend destruction failed" >> $GITHUB_STEP_SUMMARY
+              echo "❌ **Terraform backend destruction failed**" >> $GITHUB_STEP_SUMMARY
             fi
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 💰 Cost Impact" >> $GITHUB_STEP_SUMMARY
-          echo "Destroying infrastructure will stop incurring costs (~\$58-87/month saved)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Destroying infrastructure will stop incurring costs:" >> $GITHUB_STEP_SUMMARY
+          echo "- **GKE Autopilot:** ~\$12-15/month saved" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cloud SQL:** ~\$12-15/month saved" >> $GITHUB_STEP_SUMMARY
+          echo "- **Load Balancers:** ~\$20-25/month saved" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cloud Armor:** ~\$7-10/month saved" >> $GITHUB_STEP_SUMMARY
+          echo "- **Other resources:** ~\$8-12/month saved" >> $GITHUB_STEP_SUMMARY
+          echo "- **💵 Total savings:** ~\$60-77/month" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### ⏭️  Next Steps" >> $GITHUB_STEP_SUMMARY
-          echo "- Verify all resources are deleted in [GCP Console](https://console.cloud.google.com/home/dashboard?project=${{ secrets.GCP_PROJECT_ID }})" >> $GITHUB_STEP_SUMMARY
-          echo "- Check for any orphaned resources (disks, IPs, etc.)" >> $GITHUB_STEP_SUMMARY
-          echo "- Review [Cloud Billing](https://console.cloud.google.com/billing) to confirm cost reduction" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "1. ✅ **Verify** all resources are deleted in [GCP Console](https://console.cloud.google.com/home/dashboard?project=${{ secrets.GCP_PROJECT_ID }})" >> $GITHUB_STEP_SUMMARY
+          echo "2. ✅ **Check** for any orphaned resources:" >> $GITHUB_STEP_SUMMARY
+          echo "   - [Compute Engine](https://console.cloud.google.com/compute/instances?project=${{ secrets.GCP_PROJECT_ID }})" >> $GITHUB_STEP_SUMMARY
+          echo "   - [Load Balancing](https://console.cloud.google.com/net-services/loadbalancing/list?project=${{ secrets.GCP_PROJECT_ID }})" >> $GITHUB_STEP_SUMMARY
+          echo "   - [Disks](https://console.cloud.google.com/compute/disks?project=${{ secrets.GCP_PROJECT_ID }})" >> $GITHUB_STEP_SUMMARY
+          echo "   - [VPC Network](https://console.cloud.google.com/networking/networks/list?project=${{ secrets.GCP_PROJECT_ID }})" >> $GITHUB_STEP_SUMMARY
+          echo "3. ✅ **Review** [Cloud Billing](https://console.cloud.google.com/billing) to confirm cost reduction" >> $GITHUB_STEP_SUMMARY
+          echo "4. ✅ **Monitor** billing for next 7 days to ensure no unexpected charges" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔄 To Recreate Infrastructure" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event.inputs.destroy_backend }}" == "true" ]; then
+            echo "⚠️  **Backend was destroyed** - You must:" >> $GITHUB_STEP_SUMMARY
+            echo "1. Run the bootstrap workflow to create new GCS bucket" >> $GITHUB_STEP_SUMMARY
+            echo "2. Update \`GCS_BUCKET\` secret with new bucket name" >> $GITHUB_STEP_SUMMARY
+            echo "3. Re-run terraform-apply workflow" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Simply run the **terraform-apply** workflow to recreate infrastructure" >> $GITHUB_STEP_SUMMARY
+          fi
