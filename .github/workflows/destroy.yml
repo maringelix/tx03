@@ -157,25 +157,71 @@ jobs:
             -backend-config="bucket=${{ secrets.GCS_BUCKET }}" \
             -backend-config="prefix=terraform/state/${{ env.ENVIRONMENT }}"
 
-      - name: Terraform Plan Destroy
+      - name: Terraform Plan Destroy - Review
         working-directory: terraform/environments/${{ env.ENVIRONMENT }}
         run: |
-          echo "📋 Creating destroy plan..."
+          echo "📋 Generating detailed destroy plan for review..."
+          echo ""
+          echo "════════════════════════════════════════════════════════"
+          echo "   TERRAFORM DESTROY PLAN - REVIEW CAREFULLY"
+          echo "════════════════════════════════════════════════════════"
+          echo ""
+          
+          terraform plan -destroy \
+            -var="project_id=${{ secrets.GCP_PROJECT_ID }}" \
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -no-color \
+            2>&1 | tee destroy_plan_full.txt
+          
+          echo ""
+          echo "════════════════════════════════════════════════════════"
+          
+          # Extract and display summary
+          if grep -q "Plan:" destroy_plan_full.txt; then
+            echo ""
+            echo "📊 DESTROY PLAN SUMMARY:"
+            grep "Plan:" destroy_plan_full.txt | head -1
+            echo ""
+            
+            # Count resources
+            RESOURCES=$(grep -oP 'Plan: \K\d+(?= to destroy)' destroy_plan_full.txt | head -1 || echo "0")
+            
+            if [ "$RESOURCES" -eq "0" ]; then
+              echo "✨ No resources to destroy (infrastructure may already be destroyed)"
+              echo ""
+              echo "⚠️  Will proceed with cleanup steps to ensure no orphaned resources remain."
+            else
+              echo "🗑️  Total resources to be DESTROYED: $RESOURCES"
+              echo ""
+              echo "⚠️  WARNING: The following resources will be PERMANENTLY DELETED:"
+              echo ""
+              grep "will be destroyed" destroy_plan_full.txt | sed 's/^/  /' || true
+              echo ""
+              echo "💾 Terraform backend (GCS bucket) will be preserved: ${{ secrets.GCS_BUCKET }}"
+              echo "   → Set destroy_backend=true to also delete the state bucket"
+            fi
+          else
+            echo "⚠️  Could not parse plan output. Review full log above."
+          fi
+          
+          echo ""
+          echo "════════════════════════════════════════════════════════"
+          echo "⏳ Proceeding with destroy in 10 seconds..."
+          echo "   (Cancel workflow now if plan looks incorrect)"
+          echo "════════════════════════════════════════════════════════"
+          sleep 10
+
+      - name: Terraform Plan Destroy - Generate Execution Plan
+        working-directory: terraform/environments/${{ env.ENVIRONMENT }}
+        run: |
+          echo "📋 Creating destroy execution plan..."
           terraform plan \
             -destroy \
             -var="project_id=${{ secrets.GCP_PROJECT_ID }}" \
             -var="environment=${{ env.ENVIRONMENT }}" \
-            -out=destroy.tfplan \
-            2>&1 | tee destroy_plan.txt
+            -out=destroy.tfplan
           
-          # Count resources to destroy
-          RESOURCES=$(grep -oP 'Plan: \K\d+(?= to destroy)' destroy_plan.txt || echo "0")
-          echo "🗑️  Resources to destroy: $RESOURCES"
-          
-          if [ "$RESOURCES" -eq "0" ]; then
-            echo "✨ No resources to destroy."
-            exit 0
-          fi
+          echo "✅ Destroy plan created successfully"
 
       - name: Terraform Destroy
         working-directory: terraform/environments/${{ env.ENVIRONMENT }}
@@ -389,7 +435,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: destroy-log-${{ env.ENVIRONMENT }}
-          path: terraform/environments/${{ env.ENVIRONMENT }}/destroy_plan.txt
+          path: |
+            terraform/environments/${{ env.ENVIRONMENT }}/destroy_plan_full.txt
+            terraform/environments/${{ env.ENVIRONMENT }}/destroy_plan.txt
           retention-days: 30
 
   destroy-backend:
