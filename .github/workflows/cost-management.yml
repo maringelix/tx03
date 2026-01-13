@@ -34,9 +34,9 @@ on:
           - 'csv'
         default: 'table'
 
-  schedule:
-    # Run weekly cost report every Monday at 9 AM UTC
-    - cron: '0 9 * * 1'
+  # schedule:
+  #   # Run weekly cost report every Monday at 9 AM UTC - DESABILITADO (infraestrutura destruída)
+  #   - cron: '0 9 * * 1'
 
 env:
   GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}

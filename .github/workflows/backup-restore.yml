@@ -23,9 +23,9 @@ on:
         description: 'Target namespace for restore (default: dx03-dev)'
         required: false
         default: 'dx03-dev'
-  schedule:
-    # Backup diário às 3 AM UTC
-    - cron: '0 3 * * *'
+  # schedule:
+  #   # Backup diário às 3 AM UTC - DESABILITADO (infraestrutura destruída)
+  #   - cron: '0 3 * * *'
 
 permissions:
   contents: read
